@@ -1,0 +1,16 @@
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.exe
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.deps.json
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.runtimeconfig.json
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.runtimeconfig.dev.json
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.dll
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\ref\Shark.dll
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Shark.pdb
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.csprojAssemblyReference.cache
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.AssemblyInfoInputs.cache
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.AssemblyInfo.cs
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.csproj.CoreCompileInputs.cache
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.dll
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\ref\Shark.dll
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.pdb
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.genruntimeconfig.cache
