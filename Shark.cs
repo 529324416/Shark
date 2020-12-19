@@ -749,8 +749,9 @@ namespace Shark{
                     if(funcName == ENTRY_POINT){
                         SharkScriptUtil.ExtendList<string>(O,NextFunctionDefineBody());
                     }else{
-                        O.Add($"0DEFINE_FUNC {funcName}");
+                        O.Add($"1DEFINE_FUNC {funcName}");
                         SharkScriptUtil.ExtendList<string>(O,AttachDefineFunc(NextFunctionDefineBody()));
+                        O.Add("0END_DEFINE_FUNC");
                     }
                 }
                 characters.Dequeue();   //移除右花括号
@@ -1327,10 +1328,9 @@ namespace Shark{
                         functionDefination.InitializeField();
                     }
                     functionDefination.AddVariable(varName,field.FindObject(varName));
-                    functionDefination.AddILCode(line);
                     return;
                 }
-                throw SharkScriptNameError.defaultErr;
+                functionDefination.AddILCode(line);
             }
             public void OP_END_DEFINE_FUNC(){
                 /* 结束函数的定义，目标函数将保存在全局assembly中 */
@@ -1787,6 +1787,7 @@ namespace Shark{
 
             while(ilcodes.Count > 0){
                 string line = ilcodes.Dequeue();
+                Console.WriteLine(line);
                 il.RunILCode(line);
             }
             return SharkObject.None;

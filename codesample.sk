@@ -2,10 +2,13 @@
 //bind指令会将为该脚本创建一个新的函数集合，用于存储该脚本中所有的代码
 //如果不指定该指令，那么所有的函数定义将会存储在Global集合中.
 
+@Test{
+    x = "hello world";
+    print(x);
+}
 
 @Main{
     //定义主函数
 
-    x = "hello world";
-    print(x);
+    Test();   
 }
