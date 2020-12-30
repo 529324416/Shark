@@ -1,0 +1,16 @@
+x = function(score){
+    if(score >= 60){
+        print("passed");
+    }else{
+        print("failed");
+    }
+    return 1;
+};
+
+n = 100;
+while(n > 0){
+    
+    x(n);
+    n -= 1;
+    print(n);
+}

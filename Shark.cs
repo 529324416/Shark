@@ -1,1876 +1,3441 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
+using System.Collections.Generic;
 
-using Shark.CodeParser;
-using Shark.SharkException;
+using Shark.SharkExceptions;
+using Shark.SharkCodeLexer;
+using Shark.SharkIL;
 using Shark.SharkVirtualMachine;
 
 namespace Shark{
-    /* a simple script used to controll the unity */
+    /* all code about shark */
 
-    public class Tuple<T1,T2>{
-        /* a simple data structure contained two value */
+    public class SkTuple<T1,T2>{
 
         public T1 key;
         public T2 value;
+        public SkTuple(T1 k,T2 v){
 
-        public Tuple(T1 key,T2 value){
-
-            this.key = key;
-            this.value = value;
+            key = k;
+            value = v;
         }
     }
 
-    public class SharkScript{
-        /* the string object contained two parts,
-        the pragma and logical code */
+    public class SharkUtil{
+        /* provide static function tool only this function is reusable*/
 
-        private string[] __pragmas;
-        /* the pragmas will be run first, it defined that, 
-        which API would be used in target script */
+        public static bool Contains<T>(T[] array,T value) where T:class{
+            /* check that if value is contained in given array */
 
-        private string[] __scripts;
-        /* you can use the API collections and  */
-
-        public string[] Pragmas{get{return __pragmas;}}
-        public string[] Scripts{get{return __scripts;}}
-
-        public SharkScript(string[] pragmas,string[] scripts){
-            /* load data */
-
-            this.__pragmas = pragmas;
-            this.__scripts = scripts;
-        }
-        public SharkScript(LinkedList<string> pragmas,LinkedList<string> scripts){
-            /* convert to array type */
-
-            __pragmas = new string[pragmas.Count];
-            pragmas.CopyTo(__pragmas,0);
-            __scripts = new string[scripts.Count];
-            scripts.CopyTo(__scripts,0);
-        }
-    }
-
-    namespace SharkException{
-
-
-        public class SharkBaseException:Exception{
-            /* the base exception of shark */
-
-            private const string __err_info = "shark error(Shark脚本异常)";
-            public SharkBaseException():base(__err_info){}
-            public SharkBaseException(string message):base(message){}
-            public SharkBaseException(string message,Exception inner):base(message,inner){}
-        }
-
-        public class SharkScriptInvalidSyntax:SharkBaseException{
-            /* if shark script has occured a syntax error 
-            then this exception will be thrown */
-
-            public static SharkScriptInvalidSyntax defaultErr = new SharkScriptInvalidSyntax();
-
-            public const string __err_info = "invalid shark syntax(不正确的Shark语法)";
-            public SharkScriptInvalidSyntax():base(__err_info){}
-            public SharkScriptInvalidSyntax(string message):base(message){}
-            public SharkScriptInvalidSyntax(string message,Exception inner):base(message,inner){}
-        }
-        public class SharkScriptTypeError:SharkBaseException{
-
-            public static SharkScriptTypeError defaultErr = new SharkScriptTypeError();
-
-            public const string __err_info = "invalid shark type(错误的Shark类型)";
-            public SharkScriptTypeError():base(__err_info){}
-            public SharkScriptTypeError(string message):base(message){}
-            public SharkScriptTypeError(string message,Exception inner):base(message,inner){}
-        }
-        public class SharkScriptIndexError:SharkBaseException{
-
-            public static SharkScriptIndexError defaultErr = new SharkScriptIndexError();
-
-            public const string __err_info = "invalid index(索引异常)";
-            public SharkScriptIndexError():base(__err_info){}
-            public SharkScriptIndexError(string message):base(message){}
-            public SharkScriptIndexError(string message,Exception inner):base(message,inner){}
-        }
-        public class SharkScriptNameError:SharkBaseException{
-
-            public static SharkScriptNameError defaultErr = new SharkScriptNameError();
-
-            public const string __err_info = "invalid variable name(变量名异常)";
-            public SharkScriptNameError():base(__err_info){}
-            public SharkScriptNameError(string message):base(message){}
-            public SharkScriptNameError(string message,Exception inner):base(message,inner){}
-        }
-        public class SharkScriptConflictError:SharkBaseException{
-
-            public static SharkScriptConflictError defaultErr = new SharkScriptConflictError();
-
-            public const string __err_info = "confilict error(变量名冲突)";
-            public SharkScriptConflictError():base(__err_info){}
-            public SharkScriptConflictError(string message):base(message){}
-            public SharkScriptConflictError(string message,Exception inner):base(message,inner){}
-        }
-    }
-
-    namespace CodeParser{
-        /* contain the code of shark script parser */
-
-        public class SharkScriptUtil{
-            /* some basic function tools*/
-
-            public static char[] WHITE_SPACE = new char[]{' '};
-
-            public static void OutputQueue(Queue<char> codes){
-
-                int size = codes.Count;
-                for(int i = 0;i < size; i++){
-                    Console.Write(codes.Dequeue());
+            foreach(T v in array){
+                if(value.Equals(v)){
+                    return true;
                 }
             }
-            public static void OutputArray(string[] arr){
+            return false;
+        }
+        public static bool ContainsVal<T>(T[] array,T value) where T:struct{
 
-                foreach(string line in arr){
-                    Console.WriteLine(line);
+            foreach(T v in array){
+                if(value.Equals(v)){
+                    return true;
                 }
             }
-            public static void ExtendList<T>(List<T> dest,List<T> source){
-                /* 把两个列表的内容加到一起 */
+            return false;
+        }
+        public static void ShowQueue<T>(Queue<T> queue)where T:struct{
 
-                foreach(T t in source){
-                    dest.Add(t);
-                }
+            while(queue.Count > 0){
+                Console.WriteLine(queue.Dequeue().ToString());
             }
-            public static T ExtractObjectFromDict<T>(string key,Dictionary<string,T> dict){
-                /* 从字典中提取一个元素 */
+        }
 
-                T buf;
-                if(dict.TryGetValue(key,out buf)){
-                    return buf;
-                };
-                return default(T);
+        public static string ReadSource(string filepath){
+            /* read shark source code and remove comment 
+            读取Shark原始脚本并移除所有的注释*/
+
+            List<string> O = new List<string>();
+            FileStream file = new FileStream(filepath,FileMode.Open);
+            StreamReader reader = new StreamReader(file);
+
+            string buf;
+            while((buf = reader.ReadLine()) != null){
+                O.Add(buf);
             }
-            public static string[] SplitStringWithWhiteSpace(string cnt,int count){
+            return RemoveComment(O);
+        }
+        public static string RemoveComment(List<string> lines){
+            /* 移除所有的注释并将代码拼成一个完整的字符串 */
 
-                return cnt.Split(WHITE_SPACE,count);
+            string O = string.Empty;
+            foreach(string line in lines){
+                O += RemoveSingleComment(line);
             }
-            public static LinkedList<string> HandleSharkScript(string[] lines){
-                /*read all script and remove \n && // in 
-                all code */
+            return O;
+        }
+        public static string RemoveSingleComment(string line){
 
-                LinkedList<string> buf = new LinkedList<string>();
-                foreach(string line in lines){
-                    string tmp = line.Trim();
-                    if(tmp.Length > 0 && !tmp.StartsWith(SharkScriptLexer.SIGN_COMMENT)){
-                        buf.AddLast(tmp);
-                    }
-                }
-                return buf;
-            }
-            public static string[] ReadFile(string filepath){
-                /* read all text in target file and load into a string array
-                @filepath: the filepath of target shark script */
-
-                if(File.Exists(filepath)){
-                    string line;
-                    LinkedList<String> buf = new LinkedList<string>();
-                    StreamReader reader = new StreamReader(filepath);
-                    while((line = reader.ReadLine()) != null){
-                        buf.AddLast(line);
-                    }
-                    string[] arr = new string[buf.Count];
-                    buf.CopyTo(arr,0);
-                    return arr;
-                }
-                return null;
-            }
-            public static string[] RemoveComment(LinkedList<string> lines){
-                /* remove the comment in the shark code */
-
-                LinkedList<string> script = new LinkedList<string>();
-                foreach(string line in lines){
-                    script.AddLast(RemoveCommentSingleLine(line));
-                }
-                string[] buf = new string[script.Count];
-                script.CopyTo(buf,0);
-                return buf;
-            }
-            private static string RemoveCommentSingleLine(string line){
-                /* if has comment sign in line then remove it , otherwise return line */
-
-                int idx = line.IndexOf(SharkScriptLexer.SIGN_COMMENT);
-                if(idx == -1){
-                    return line;
-                }
-                return line.Substring(0,idx);
-            }
-            public static string[] ReadSharkScript(string filepath){
-                /* read shark string from file */
-
-                string[] script = ReadFile(filepath);
-                if(script != null){
-                    return RemoveComment(HandleSharkScript(script));
-                }
-                return null;
-            }
-            public static SharkScript SelectCodes(string[] lines){
-                /* choose all pragma in target code */
-
-                LinkedList<string> pragmas = new LinkedList<string>();
-                LinkedList<string> scripts = new LinkedList<string>();
-                foreach(string line in lines){
-                    if(line.StartsWith(SharkScriptLexer.SIGN_PRAGMA.ToString())){
-                        pragmas.AddLast(line);
+            bool isInString = false;
+            Queue<char> characters = new Queue<char>();
+            string buf = string.Empty;
+            foreach(char c in line){characters.Enqueue(c);}
+            while(characters.Count > 0){
+                char nextChar = characters.Peek();
+                if(isInString){
+                    if(nextChar == '\\'){
+                        buf += characters.Dequeue().ToString() + characters.Dequeue().ToString();
+                    }else if(nextChar == '"'){
+                        isInString = false;
+                        buf += characters.Dequeue().ToString();
                     }else{
-                        scripts.AddLast(line);
+                        buf += characters.Dequeue().ToString();
                     }
-                }
-                return new SharkScript(pragmas,scripts);
-            }
-            public static string CombineStringList(LinkedList<string> list){
-                /* link all string value in target list into one string and return */
-
-                string buf = string.Empty;
-                foreach(string line in list){
-                    buf += line;
-                }
-                return buf;
-            }
-            public static Queue<char> GenerateCode(string script){
-                /* generate a char queue from given string value */
-
-                bool hasSpace = false;
-                Queue<char> O = new Queue<char>();
-                foreach(char c in script.Trim()){
-                    if(char.IsWhiteSpace(c)){
-                        if(!hasSpace){
-                            hasSpace = true;
-                            O.Enqueue(c);
+                    
+                }else{
+                    //还不在一个字符串内，此时主要检测是否存在注释符号.
+                    if(nextChar == '/'){
+                        characters.Dequeue();
+                        if(characters.Peek() == '/'){
+                            // is comment after this
+                            break;
+                        }else{
+                            buf += nextChar.ToString();
                         }
+                    }else if(nextChar == '"'){
+                        isInString = true;
+                        buf += characters.Dequeue().ToString();
                     }else{
-                        if(hasSpace){
-                            hasSpace = false;
-                        }
-                        O.Enqueue(c);
+                        buf += characters.Dequeue().ToString();
                     }
                 }
-                return O;
             }
+            return buf;
         }
+    }
 
-        public enum PDA_NUMBER_TYPE{
-            /* flaot or int */
+    namespace SharkExceptions{
+        /* the exception of shark */
 
-            INT,
-            FLOAT
+        public class SharkException:Exception{
+            public SharkException():base("shark exception"){}
+            public SharkException(string message):base(message){}
+            public SharkException(string message,Exception inner):base(message,inner){}
         }
-        public enum RESULT_LETTER{
-
-            VAR,
-            FUNC
+        public class SharkTokenException:SharkException{
+            
+            public static SharkTokenException defaultErr = new SharkTokenException();
+            public SharkTokenException():base("shark token exception"){}
+            public SharkTokenException(string message):base(message){}
+            public SharkTokenException(string message,Exception inner):base(message,inner){}
         }
-
-        public class PDA{
-            /* when entry a new part, then code parser will generate a new pda
-            the pda will parse all character until entry code format error or */
-
-            public delegate bool BoolGetterREQString(char nextChar);
-
-            public static void PDASafeCheck(Queue<char> codes){
-                /* until the code has parse done, otherwise the codes shouldn't end */
-
-                if(codes.Count == 0){
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static string NextString(Queue<char> codes,string tmp){
-                /* get next string value */
-
-                char nextChar = codes.Peek();
-                if(nextChar == SharkScriptLexer.VAR_STRING){
-                    return tmp + codes.Dequeue().ToString();
-                }
-                return NextString(codes,tmp + codes.Dequeue().ToString());
-            }
-            public static string NextString(Queue<char> codes){
-                /* 获取下一个字符串对象 */
-
-                codes.Dequeue();        //移除第一个引号
-                return __NextString(codes,string.Empty);
-            }
-            private static string __NextString(Queue<char> codes,string tmp){
-
-                char nextChar = codes.Peek();
-                if(nextChar == SharkScriptLexer.VAR_STRING){
-                    codes.Dequeue();    //移除第二个引号
-                    return tmp;
-                }
-                codes.Dequeue();
-                return __NextString(codes,tmp + nextChar.ToString());
-            }
-            public static string NextLine(Queue<char> codes){
-                /* do nothing about first character */
-
-                return NextLine(codes,string.Empty);
-            }
-            public static string NextLine(Queue<char> codes,string tmp){
-                /* get next line until a ; occurred, this function will 
-                do some basic check before get the whole line */
-
-                char nextChar = codes.Peek();
-                if(nextChar == SharkScriptLexer.VAR_STRING){
-                    string __tmp = codes.Dequeue().ToString();
-                    tmp += NextString(codes,__tmp);
-                    return NextLine(codes,tmp);
-                }else if(nextChar == SharkScriptLexer.CODE_SEP){
-                    return tmp;
-                }else{
-                    tmp += codes.Dequeue().ToString();
-                    return NextLine(codes,tmp);
-                }
-            }
-            public static Tuple<string,PDA_NUMBER_TYPE> NextNumber(Queue<char> codes,string tmp){
-                /* get next number value, and this function would have chance to jump to next 
-                function NextFloat only if one '.' has been found, note that the end of 
-                this PDA has more than one characters, including ')' ',' and ';' */
-
-                char nextChar = codes.Peek();
-                if(char.IsDigit(nextChar)){
-                    tmp += codes.Dequeue().ToString();
-                    return NextNumber(codes,tmp);
-                }else if(nextChar == SharkScriptLexer.VAR_FLOAT){
-                    tmp += codes.Dequeue().ToString();
-                    return NextFlaot(codes,tmp);
-                }else if(IsNumberEnd(nextChar)){
-                    return new Tuple<string, PDA_NUMBER_TYPE>(tmp,PDA_NUMBER_TYPE.INT);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static Tuple<string,PDA_NUMBER_TYPE> NextFlaot(Queue<char> codes,string tmp){
-                /* get next float value */
-
-                char nextChar = codes.Peek();
-                if(char.IsDigit(nextChar)){
-                    tmp += codes.Dequeue().ToString();
-                    return NextFlaot(codes,tmp);
-                }else if(IsNumberEnd(nextChar)){
-                    return new Tuple<string, PDA_NUMBER_TYPE>(tmp,PDA_NUMBER_TYPE.FLOAT);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static Tuple<string,PDA_NUMBER_TYPE> NextNumberWithCustomEnding(
-                Queue<char> codes,string tmp,BoolGetterREQString conditionSignal){
-                /* get next number value, and this function would have chance to jump to next 
-                function NextFloat only if one '.' has been found, note that the end of 
-                this PDA has more than one characters, including ')' ',' and ';' */
-
-                char nextChar = codes.Peek();
-                if(char.IsDigit(nextChar)){
-                    codes.Dequeue();
-                    return NextNumberWithCustomEnding(codes,tmp + nextChar.ToString(),conditionSignal);
-                }else if(nextChar == SharkScriptLexer.VAR_FLOAT){
-                    codes.Dequeue();
-                    return NextFloatWithCustomEnding(codes,tmp + nextChar.ToString(),conditionSignal);
-                }else if(conditionSignal(nextChar)){
-                    return new Tuple<string, PDA_NUMBER_TYPE>(tmp,PDA_NUMBER_TYPE.INT);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static Tuple<string,PDA_NUMBER_TYPE> NextFloatWithCustomEnding(
-                Queue<char> codes,string tmp,BoolGetterREQString conditionSignal){
-                /* get next float value */
-
-                char nextChar = codes.Peek();
-                if(char.IsDigit(nextChar)){
-                    codes.Dequeue();
-                    return NextFloatWithCustomEnding(codes,tmp + nextChar.ToString(),conditionSignal);
-                }else if(conditionSignal(nextChar)){
-                    return new Tuple<string, PDA_NUMBER_TYPE>(tmp,PDA_NUMBER_TYPE.FLOAT);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static Tuple<string,RESULT_LETTER> NextGuessLetterInList(Queue<char> codes){
-                /* 找到下一个由字母或者下划线开头的对象，如果是一个变量，REUSLT_LETTER为VAR
-                否则为FUNC */
-
-                string head = codes.Dequeue().ToString();
-                return __NextGuessLetterInList(codes,head);
-            }
-            private static Tuple<string,RESULT_LETTER> __NextGuessLetterInList(Queue<char> codes,string head){
-                /* 除了第一个字符之外，其他的字符可以包括数字 */
-
-                char nextChar = codes.Peek();
-                if(char.IsLetterOrDigit(nextChar) || nextChar == SharkScriptLexer.UNDERLINE){
-                    string _ = codes.Dequeue().ToString();
-                    return __NextGuessLetterInList(codes,head + _);
-                }else if(IsListEnd(nextChar)){
-                    return new Tuple<string, RESULT_LETTER>(head,RESULT_LETTER.VAR);
-                }else if(nextChar == SharkScriptLexer.FUNCTION_PARAMS_START){
-                    return new Tuple<string, RESULT_LETTER>(head,RESULT_LETTER.FUNC);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public static Tuple<string,RESULT_LETTER> NextGuessLetter(Queue<char> codes,char stop){
-                /* 找到下一个由字母或者下划线开头的对象，如果是一个变量，RESULT_LETTER为VAR否则为FUNC 
-                @_：表示该变量是第一阶段还是第二阶段，如果是第一阶段，终止符可以是赋值号，否则不可以 */
-
-                string head = codes.Dequeue().ToString();
-                return __NextGuessLetter(codes,head,stop);
-            }
-            public static Tuple<string,RESULT_LETTER> __NextGuessLetter(Queue<char> codes,string head,char stop){
-                /* 除了第一个字母外，其他的字母可以是数字下划线或者字母,
-                和__NextGuessLetterInList不同的是，这个函数的终止符是;*/
-
-                char nextChar = codes.Peek();
-                if(char.IsLetterOrDigit(nextChar) || nextChar == SharkScriptLexer.UNDERLINE){
-                    /* 用下推状态机滚动到停止符号 */
-
-                    string c = codes.Dequeue().ToString();
-                    return __NextGuessLetter(codes,head + c,stop);
-                }else if(nextChar == stop){
-                    /* 遇到函数终止符，仅用于给别的变量赋值时才能进行的操作 */
-
-                    return new Tuple<string, RESULT_LETTER>(head,RESULT_LETTER.VAR);
-                }else if(nextChar == SharkScriptLexer.FUNCTION_PARAMS_START){
-                    /* 该变量是一个函数调用 */
-
-                    return new Tuple<string, RESULT_LETTER>(head,RESULT_LETTER.FUNC);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-
-            public static bool IsNumberEnd(char nextChar){
-                /* check out if should exit next_number function now */
-
-                return nextChar == SharkScriptLexer.CODE_SEP || 
-                nextChar == SharkScriptLexer.FUNCTION_PARAMS_END || 
-                nextChar == SharkScriptLexer.FUNCTION_PARAMS_SEP;
-            }
-            public static bool IsNumberEndArgs(char nextChar){
-
-                return nextChar == SharkScriptLexer.FUNCTION_PARAMS_SEP || 
-                nextChar == SharkScriptLexer.FUNCTION_BODY_START;
-            }
-            public static bool IsNumberEndLine(char nextChar){
-
-                return nextChar == SharkScriptLexer.CODE_SEP;
-            }
-            public static bool IsListEnd(char nextChar){
-                /* 检查是否一个列表或者参数列表元素已经结束了 */
-
-                return nextChar == SharkScriptLexer.FUNCTION_PARAMS_SEP || 
-                nextChar == SharkScriptLexer.LIST_END ||
-                nextChar == SharkScriptLexer.FUNCTION_PARAMS_END;
-            }
+        public class SharkCodeFormatException:SharkException{
+            
+            public static SharkCodeFormatException defaultErr = new SharkCodeFormatException();
+            public SharkCodeFormatException():base("shark code format exception"){}
+            public SharkCodeFormatException(string message):base(message){}
+            public SharkCodeFormatException(string message,Exception inner):base(message,inner){}
         }
+        public class SharkTypeError:SharkException{
+            
+            public static SharkTypeError defaultErr = new SharkTypeError();
+            public SharkTypeError():base("unsupport type in shark"){}
+            public SharkTypeError(string message):base(message){}
+            public SharkTypeError(string message,Exception inner):base(message,inner){}
+        }
+        public class SharkIndexError:SharkException{
+            
+            public static SharkIndexError defaultErr = new SharkIndexError();
+            public SharkIndexError():base("index out of range"){}
+            public SharkIndexError(string message):base(message){}
+            public SharkIndexError(string message,Exception inner):base(message,inner){}
+        }
+        public class SharkNameError:SharkException{
+            
+            public static SharkNameError defaultErr = new SharkNameError();
+            public SharkNameError():base("shark name error"){}
+            public SharkNameError(string message):base(message){}
+            public SharkNameError(string message,Exception inner):base(message,inner){}
+        }
+    }
 
-        public class SharkScriptLexer{
-            /* used to analysis the shark script */
+    namespace SharkCodeLexer{
+        /* the code about code analysis lexer */
 
-            public const string SIGN_COMMENT = "//";
-            public const char SIGN_FUNCTION = '@';
-            public const char SIGN_PRAGMA = '#';
-            public const char LIST_START = '[';
-            public const char LIST_END = ']';
-            public const char FUNCTION_BODY_START = '{';
-            public const char FUNCTION_BODY_END = '}';
-            public const char FUNCTION_PARAMS_START = '(';
-            public const char FUNCTION_PARAMS_END = ')';
-            public const char FUNCTION_PARAMS_SEP = ',';
-            public const char VAR_STRING = '\"';
-            public const char VAR_FLOAT = '.';
-            public const char OP_ASSIGN = '=';
-            public const char CODE_SEP = ';';
-            public const string PRAGMA_API = "#api";
-            public const string PRAGMA_BIND = "#bind";
-            public const char SPACE = ' ';
+        public class TokenSet{
+
+            //public const char funcDefination = '@';
+            public const string funcDefination = "function";
+            public const char opAssign = '=';
+            public const char opAdd = '+';
+            public const char opSub = '-';
+            public const char opMul = '*';
+            public const char opPow = '^';
+            public const char opMod = '%';
+            public const char opDiv = '/';
+            public const char opLt = '<';
+            public const char opGt = '>';
+            public const string opAssignAdd = "+=";
+            public const string opAssignSub = "-=";
+            public const string opAssignMul = "*=";
+            public const string opAssignDiv = "/=";
+            public const string opAssignMod = "%=";
+            public const string opLe = "<=";
+            public const string opGe = ">=";
+            public const string opEq = "==";
+            public const string opNe = "!=";
+            public const string opAnd = "&&";
+            public const string opOr = "||";
+            public const char opNot = '!';
+            public const string sysReturn = "return";
+            public const string sysIf = "if";
+            public const string sysWhile = "while";
+            public const string sysElse = "else";
+            public const string sysElif = "elif";
+            public const string sysTrue = "true";
+            public const string sysFalse = "false";
+            public const string sysNull = "null";
+            public const string sysBreak = "break";
+            public const char listSeparation = ',';
+            public const char codeSeparation = ';';
+            public const char varString = '"';
+            public const char listLeft = '[';
+            public const char listRight = ']';
+            public const char blockLeft = '{';
+            public const char blockRight = '}';
+            public const char paranthesesLeft = '(';
+            public const char paranthesesRight = ')';
+            public const char underLine = '_';
+            public const char point = '.';
+            public const char space = ' ';
+            public const char cast = '\\';
             public const char EOL = '\n';
-            public const string ENTRY_POINT = "Main";
+            public const char castR = '\r';
 
-            public const char UNDERLINE = '_';
+            public static string[] sysWords = new string[]{
 
+                TokenSet.funcDefination,
+                TokenSet.sysReturn,
+                TokenSet.sysWhile,
+                TokenSet.sysIf,
+                TokenSet.sysElse,
+                TokenSet.sysElif,
+                TokenSet.sysNull,
+                TokenSet.sysBreak,
+            };
+            public static string[] opAssigns = new string[]{
+
+                opAssign.ToString(),
+                opAssignAdd,
+                opAssignSub,
+                opAssignMul,
+                opAssignDiv,
+                opAssignMod
+            };
+            public static string[] opDouble = new string[]{
+                opNe,
+                opEq,
+                opAnd,
+                opOr
+            };
+            public static char[] separations = new char[]{
+                listSeparation,
+                codeSeparation,
+                listLeft,
+                listRight,
+                blockLeft,
+                blockRight,
+                paranthesesLeft,
+                paranthesesRight
+            };
+            public static char[] opComputeAssign = new char[]{
+
+                opAdd,
+                opSub,
+                opMul,
+                opDiv,
+                opMod  
+            };
+            public static TokenType[] literal = new TokenType[]{
+
+                TokenType.BOOLEAN,
+                TokenType.FLOAT,
+                TokenType.INT,
+                TokenType.STRING
+            };
+            public static string[] opCompare = new string[]{
+                /* compare operator */
+
+                opEq,
+                opNe,
+                opGe,
+                opLe,
+                opGt.ToString(),
+                opLt.ToString()
+            };
+            public static string[] opLogic = new string[]{
+                /* logical operator */
+
+                opNot.ToString(),
+                opAnd,
+                opOr,
+            };
+            public static bool isSysWords(string tmp){
+                /* check that if target */
+
+                return SharkUtil.Contains<string>(sysWords,tmp);
+            }
+        }
+
+        public enum TokenType{
+            /* type of token, and */
+
+            BOOLEAN,
+            INT,
+            FLOAT,
+            STRING,
+            SYSKEYWORD,
+            SEPARATION,
+            OPERATOR,
+            ID,
+            VIRTUAL
+        }
+
+        public struct Token{
+            /* contained the type of token, and a string type value to marked 
+            the token content */
+
+            public TokenType type;
+            public string value;
+
+            public Token(TokenType type,string value){
+                this.type = type;
+                this.value = value;
+            }
+            public override string ToString()
+            {
+                return $"[{this.type} : {this.value}]";
+            }
+            public bool IsID{
+
+                get{return type == TokenType.ID;}
+            }
+            public bool IsLiteral{
+                /* check if token is a literal */
+
+                get{return (byte)type <= 3;}
+            }
+        }
+
+        public class CodeScanner{
+            /* used to scan the code and get a the array of code */
 
             private Queue<char> characters;
-            private Queue<string> ILCodes;
-
-            private PDA.BoolGetterREQString listEnding = ListElementEnding;
-            private PDA.BoolGetterREQString codeSepEnding = CodeSepEnding;
-            public SharkScriptLexer(){
-                /* intialize the characters object and ready to load shark script */
-
+            public CodeScanner(){
                 characters = new Queue<char>();
             }
-            public void LoadScript(string script){
-                /* load the script into characters 
-                注意这里的script是预处理处理过的第二部分 */
+            public void LoadSource(string script){
+                /* load source code into characters */
 
-                characters.Clear();
                 foreach(char c in script){
                     characters.Enqueue(c);
                 }
             }
-            public Queue<string> GenerateILCode(string[] lines,bool showILCode){
-                /* 生成中间代码 */
+            public Token NextID(){
+                /* find next id value, note that, the id can be a system keyword
+                when we get a underline or a letter, then we can use this function to get the 
+                complete id name */
 
-                ILCodes = new Queue<string>();
-                Tuple<string[],string> combinations = HandleSourceCode(lines);
-                foreach(string pragma in combinations.key){ILCodes.Enqueue(pragma);}
-                LoadScript(combinations.value);
+                return __NextID(characters.Dequeue().ToString());
+            }
+            private Token __NextID(string tmp){
 
+                char c = characters.Peek();
+                if(char.IsLetterOrDigit(c) || c == TokenSet.underLine){
+                    return __NextID(tmp + characters.Dequeue().ToString());
+                }
+                if(TokenSet.isSysWords(tmp)){
+                    return new Token(TokenType.SYSKEYWORD,tmp);
+                }else if(tmp == TokenSet.sysTrue || tmp == TokenSet.sysFalse){
+                    return new Token(TokenType.BOOLEAN,tmp);
+                }else{
+                    return new Token(TokenType.ID,tmp);
+                }
+                
+            }
+
+            public Token NextString(){
+                /* when a " find in last peek, then this function will find next complete 
+                string type value */
+
+                return __NextString(characters.Dequeue().ToString());
+            }
+            public Token __NextString(string tmp){
+
+                char c = characters.Peek(); // next string
+                if(c == TokenSet.cast){
+                    /* the characters has been cast now */
+
+                    return __NextString(tmp + characters.Dequeue().ToString() + characters.Dequeue().ToString());
+                }else{
+                    if(c == TokenSet.varString){
+                        return new Token(TokenType.STRING,tmp + characters.Dequeue().ToString());
+                    }
+                    return __NextString(tmp + characters.Dequeue().ToString());
+                }
+            }
+            public Token NextNumber(){
+                /* when you got a digital value, then this function can help 
+                to find the complete number value, when a . has been found, then
+                NextFloat will take the place of NextInt*/
+
+                return __NextNumber(characters.Dequeue().ToString());
+            }
+            public Token __NextNumber(string tmp){
+
+                char c = characters.Peek();
+                if(char.IsDigit(c)){
+                    return __NextNumber(tmp + characters.Dequeue().ToString());
+                }else if(c == TokenSet.point){
+                    return __NextFloat(tmp + characters.Dequeue().ToString());
+                }else{
+                    return new Token(TokenType.INT,tmp);
+                }
+            }
+            public Token __NextFloat(string tmp){
+
+                char c = characters.Peek();
+                if(char.IsDigit(c)){
+                    return __NextFloat(tmp + characters.Dequeue().ToString());
+                }
+                return new Token(TokenType.FLOAT,tmp);
+            }
+            public Token NextLogic(){
+
+                return __NextLogic(characters.Dequeue().ToString());
+            }
+            public Token __NextLogic(string tmp){
+                /* */
+
+                char c = characters.Peek();
+                if(c.ToString() == tmp){
+                    return new Token(TokenType.OPERATOR,tmp + characters.Dequeue().ToString());
+                }
+                throw new SharkException("invalid logical token");
+            }
+            public Token NextEqual(string tmp){
+
+                char c = characters.Peek();
+                if(c == TokenSet.opAssign){
+                    return new Token(TokenType.OPERATOR,tmp + characters.Dequeue().ToString());
+                }
+                return new Token(TokenType.OPERATOR,tmp);
+            }
+            public Token NextCompare(string tmp){
+
+                char c = characters.Peek();
+                if(c == TokenSet.opAssign){
+                    return new Token(TokenType.OPERATOR,tmp + characters.Dequeue().ToString());
+                }
+                return new Token(TokenType.OPERATOR,tmp);
+            }
+            public Token NextComputeAssign(string tmp){
+
+                char c = characters.Peek();
+                if(c == TokenSet.opAssign){
+                    return new Token(TokenType.OPERATOR,tmp + characters.Dequeue().ToString());
+                }
+                return new Token(TokenType.OPERATOR,tmp);
+            }
+            public Queue<Token> Scan(){
+                /* scan all characters to get a token list */
+
+                Queue<Token> O = new Queue<Token>();
                 while(characters.Count > 0){
-                    if(characters.Peek() == SIGN_FUNCTION){
-                        List<string> list = NextFunctionDefination();
-                        foreach(string line in list){
-                            if(showILCode){
-                                Console.WriteLine(line);
-                            }
-                            ILCodes.Enqueue(line);
-                        }
-                    }else{
-                        throw SharkScriptInvalidSyntax.defaultErr;
-                    }
-                }
-                return ILCodes;
-            }
-            public string NextNumberInList(){
-                /* 解析下一个数字型值，并生成针对列表项的IL代码 */
+                    char c = characters.Peek();
+                    if(c == TokenSet.varString){
 
-                string tmp = characters.Dequeue().ToString();
-                Tuple<string,PDA_NUMBER_TYPE> result = PDA.NextNumberWithCustomEnding(characters,tmp,listEnding);
-                if(result.value == PDA_NUMBER_TYPE.FLOAT){
-                    return $"1PUSH_FLOAT {result.key}";
-                }
-                return $"1PUSH_INT {result.key}";
-            }
-            public string NextNumberFillVariable(string varName){
-                /* 解析下一个数字类型，并生成对应变量值的IL代码 */
-
-                string tmp = characters.Dequeue().ToString();
-                Tuple<string,PDA_NUMBER_TYPE> result = PDA.NextNumberWithCustomEnding(characters,tmp,CodeSepEnding);
-                if(result.value == PDA_NUMBER_TYPE.FLOAT){
-                    return $"2FILL_FLOAT {varName} {result.key}";
-                }
-                return $"2FILL_INT {varName} {result.key}";
-            }
-            public string NextStringInList(){
-                /* 解析下一个字符串型值，并生成针对列表项的IL代码 */
-
-                return $"1PUSH_STRING {PDA.NextString(characters)}";
-            }
-            public string NextStringFillVariable(string varName){
-                /* 解析下一个字符串型值，并生成针对变量值的IL代码 */
-
-                return $"2FILL_STRING {varName} {PDA.NextString(characters)}";
-            }
-            public Tuple<object,RESULT_LETTER> NextVariableInList(){
-                /* 当检测到开头的字母是下划线或者,当结尾并不是,或者]而是一个(时，则认为
-                该对象是一个函数，并连带之前的内容跳转到函数调用的解析策略中 */
-
-                Tuple<string,RESULT_LETTER> R = PDA.NextGuessLetterInList(characters);
-                if(R.value == RESULT_LETTER.VAR){
-                    return new Tuple<object, RESULT_LETTER>($"1PUSH_VAR {R.key}",R.value);
-                }
-                List<string> O = new List<string>();
-                O.Add($"1FIND_FUNC {R.key}");
-                characters.Dequeue();   //移除左括号
-                SharkScriptUtil.ExtendList<string>(O,NextParamList());
-                O.Add($"0DOCALL_FILL_PARAM");
-                return new Tuple<object, RESULT_LETTER>(O,RESULT_LETTER.FUNC);
-            }
-            public Tuple<object,RESULT_LETTER> NextVariable(){
-                /* 当检测到开头的字母是下划线或者,当结尾并不是,或者]而是一个(时，则认为
-                该对象是一个函数，并连带之前的内容跳转到函数调用的解析策略中,
-                该函数针对的是一个不在列表的元素 */
-
-                Tuple<string,RESULT_LETTER> R = PDA.NextGuessLetter(characters,OP_ASSIGN);       //函数可以赋值号作为状态机终止符
-                if(R.value == RESULT_LETTER.VAR){
-                    return new Tuple<object, RESULT_LETTER>(R.key,R.value);
-                }
-                List<string> O = new List<string>();
-                O.Add($"1FIND_FUNC {R.key}");
-                characters.Dequeue();   //移除左括号
-                SharkScriptUtil.ExtendList<string>(O,NextParamList());
-                O.Add($"0DOCALL");
-                return new Tuple<object, RESULT_LETTER>(O,RESULT_LETTER.FUNC);
-            }
-            public Tuple<object,RESULT_LETTER> NextVariable(string varName){
-                /* 当检测到开头的字母是下划线或者,当结尾并不是,或者]而是一个(时，则认为
-                该对象是一个函数，并连带之前的内容跳转到函数调用的解析策略中,
-                该函数针对的是一个不在列表的元素 */
-
-                Tuple<string,RESULT_LETTER> R = PDA.NextGuessLetter(characters,CODE_SEP);      //赋值符号不再成为终止符
-                if(R.value == RESULT_LETTER.VAR){
-                    return new Tuple<object, RESULT_LETTER>($"2FILL_VAR {varName} {R.key}",R.value);
-                }
-                List<string> O = new List<string>();
-                O.Add($"1FIND_FUNC {R.key}");
-                characters.Dequeue();   //移除左括号
-                SharkScriptUtil.ExtendList<string>(O,NextParamList());
-                O.Add($"1DOCALL_FILL {varName}");
-                return new Tuple<object, RESULT_LETTER>(O,RESULT_LETTER.FUNC);
-            }
-            public List<string> NextParamList(){
-                /* 找到下一个完整的参数列表 */
-
-                List<string> O = new List<string>();
-                O.Add("0MAKE_LIST");
-                char nextChar = characters.Peek();
-                if(nextChar == FUNCTION_PARAMS_END){
-                    /*参数的末尾了*/
-
-                    characters.Dequeue();   //移除右括号
-                    return O;
-                }
-                return __NextParamList(O);
-            }
-            public List<string> __NextParamList(List<string> O){
-                /* PDA函数 */
-
-                char nextChar = characters.Peek();
-                if(nextChar == FUNCTION_PARAMS_END){
-                    /* 参数列表已经搜索完毕 */
-
-                    characters.Dequeue();
-                    return O;
-                }else if(char.IsDigit(nextChar)){
-                    /* 数字型参数 */
-
-                    O.Add(NextNumberInList());
-                    return __NextParamList(O);
-                }else if(nextChar == VAR_STRING){
-                    /* 字符串型参数 */
-
-                    O.Add(NextStringInList());
-                    return __NextParamList(O);
-                }else if(char.IsLetter(nextChar) || nextChar == UNDERLINE){
-                    /* 变量型参数 */
-
-                    Tuple<object,RESULT_LETTER> R = NextVariableInList();
-                    if(R.value == RESULT_LETTER.FUNC){
-                        SharkScriptUtil.ExtendList<string>(O,(List<string>)R.key);
-                    }else{
-                        O.Add((string)R.key);
-                    }
-                    return __NextParamList(O);
-                }else if(nextChar == LIST_START){
-                    /* 列表型数据 */
-
-                    characters.Dequeue();
-                    SharkScriptUtil.ExtendList<string>(O,NextList());
-                    return __NextParamList(O);
-                }else if(nextChar == FUNCTION_PARAMS_SEP){
-                    /*遇到分隔符，则移除该分隔符重新选取下一个符号 */
-
-                    characters.Dequeue();
-                    return __NextParamList(O);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public List<string> NextList(){
-                /* 解析下一个完整的列表,如果遇到异常则报代码结构错误,进入该函数则默认上一个出现的字符是 [ 
-                @callbackCommand: 该字符串表示当列表解析完成后，该对列表做怎样的操作 */
-
-                List<string> O = new List<string>();
-                O.Add("0MAKE_LIST");
-                char nextChar = characters.Peek();
-                if(nextChar == SharkScriptLexer.LIST_END){
-                    return O;
-                }
-                return __NextList(O);
-            }
-            private List<string> __NextList(List<string> O){
-                /* PDA函数 */
-
-                char nextChar = characters.Peek();
-                if(nextChar == LIST_END){
-
-                    characters.Dequeue();
-                    return O;
-                }else if(char.IsDigit(nextChar)){
-                    /* 数字型参数 */
-
-                    O.Add(NextNumberInList());
-                    return __NextList(O);
-                }else if(nextChar == VAR_STRING){
-                    /* 字符串型参数 */
-
-                    O.Add(NextStringInList());
-                    return __NextList(O);
-                }else if(char.IsLetter(nextChar) || nextChar == UNDERLINE){
-                    /* 变量型参数 */
-
-                    Tuple<object,RESULT_LETTER> R = NextVariableInList();
-                    if(R.value == RESULT_LETTER.FUNC){
-                        SharkScriptUtil.ExtendList<string>(O,(List<string>)R.key);
-                    }else{
-                        O.Add((string)R.key);
-                    }
-                    return __NextList(O);
-                }else if(nextChar == LIST_START){
-                    /* 列表型数据 */
-
-                    characters.Dequeue();
-                    SharkScriptUtil.ExtendList<string>(O,NextList());
-                    O.Add("0FILL_PARAM");
-                    return __NextList(O);
-                }else if(nextChar == SIGN_FUNCTION){
-                    /* 定义一个函数 */
-
-                    SharkScriptUtil.ExtendList<string>(O,NextFunctionDefination());
-                    O.Add("0END_DEFINE_FUNC_INLIST");
-                    return __NextList(O);
-                }else if(nextChar == FUNCTION_PARAMS_SEP){
-                    /*遇到分隔符后忽略，并从下一个字符开始 */
-
-                    characters.Dequeue();
-                    return __NextList(O);
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public List<string> NextFunctionDefination(){
-                /* 找到下一个完整的函数定义,当首次找到的标签为一个@时，进入该函数 */
-
-                characters.Dequeue();       //移除符号@
-                List<string> O = new List<string>();
-                string funcName = NextFunctionDefineName();
-                characters.Dequeue();   //移除左花括号
-                if(funcName == null){
-                    O.Add("0DEFINE_FUNC_NULLNAME");
-                    SharkScriptUtil.ExtendList<string>(O,AttachDefineFunc(NextFunctionDefineBody()));
-                }else{
-                    if(funcName == ENTRY_POINT){
-                        SharkScriptUtil.ExtendList<string>(O,NextFunctionDefineBody());
-                    }else{
-                        O.Add($"1DEFINE_FUNC {funcName}");
-                        SharkScriptUtil.ExtendList<string>(O,AttachDefineFunc(NextFunctionDefineBody()));
-                        O.Add("0END_DEFINE_FUNC");
-                    }
-                }
-                characters.Dequeue();   //移除右花括号
-                return O;
-            }
-            public List<string> AttachDefineFunc(List<string> O){
-
-                List<string> _O = new List<string>();
-                foreach(string line in O){
-                    if(line.IndexOf("PUSH_VAR") > 0){
-                        _O.Add($"1ADDILCODE_PUSHVAR {line}");
-                    }else{
-                        _O.Add($"1ADDILCODE {line}");
-                    }
-                }
-                return _O;
-            }
-            public string NextFunctionDefineName(){
-                /* 找到下一个函数的完整的函数名,支持匿名函数,但匿名函数必须赋值给一个变量
-                或者塞入参数列表或者作为列表项目 */
-
-                char nextChar = characters.Peek();
-                if(nextChar == FUNCTION_BODY_START){
-                    return null;
-                }else if(IsVarHead(nextChar)){
-
-                    characters.Dequeue();   //remove the first character;
-                    return __NextFunctionDefineName(nextChar.ToString());
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public string __NextFunctionDefineName(string buf){
-                /* PDA函数,从这里开始，函数就不再是一个匿名函数*/
-
-                char nextChar = characters.Peek();
-                if(nextChar == FUNCTION_BODY_START){
-                    return buf;
-                }else if(char.IsLetterOrDigit(nextChar)||nextChar == UNDERLINE){
-
-                    characters.Dequeue();
-                    return __NextFunctionDefineName(buf + nextChar.ToString());
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public List<string> NextFunctionDefineBody(){
-                /* 找到下一个完整的函数体，并生成中间代码 */
-
-                List<string> O = new List<string>();
-                char nextChar = characters.Peek();
-                if(IsVarHead(nextChar)){
-                    /* 是一个变量并且没有结束 */
-
-                    return __NextFunctionDefineBody(O);
-                }else if(nextChar == FUNCTION_BODY_END){
-
-                    return O;
-                }else{
-                    throw SharkScriptInvalidSyntax.defaultErr;
-                }
-            }
-            public List<string> __NextFunctionDefineBody(List<string> O){
-                /* 找到下一个完整的函数体，并生成中间代码 */
-
-                Tuple<object,RESULT_LETTER> R = NextVariable();
-                if(R.value == RESULT_LETTER.FUNC){
-                    SharkScriptUtil.ExtendList<string>(O,(List<string>)R.key);
-                }else{
-                    string varName = (string)R.key;
-                    O.Add($"1DIM {varName}");
-                    characters.Dequeue();   //移除赋值号
-                    char c = characters.Peek(); //获取下一个字符
-                    if(IsVarHead(c)){
-                        Tuple<object,RESULT_LETTER> R2 = NextVariable(varName);
-                        if(R2.value == RESULT_LETTER.FUNC){
-                            SharkScriptUtil.ExtendList<string>(O,(List<string>)R2.key);
-                        }else{
-                            O.Add((string)R.key);
-                        }
+                        O.Enqueue(NextString());
                     }else if(char.IsDigit(c)){
-                        /* 数字型变量 */
 
-                        O.Add(NextNumberFillVariable(varName));
-                    }else if(c == LIST_START){
-                        /* list type value */
+                        O.Enqueue(NextNumber());
+                    }else if(char.IsLetter(c) || c == TokenSet.underLine){
 
-                        characters.Dequeue();   //remove the sign '['
-                        SharkScriptUtil.ExtendList<string>(O,NextList());
-                        O.Add($"1FILL_LIST {varName}");
+                        O.Enqueue(NextID());
+                    }else if(c == TokenSet.opNot || c == TokenSet.opPow){
 
-                    }else if(c == VAR_STRING){
-                        /*string type value*/
+                        O.Enqueue(new Token(TokenType.OPERATOR,characters.Dequeue().ToString()));
+                    }else if(c == '&' || c == '|'){
 
-                        O.Add(NextStringFillVariable(varName));
-                    }else if(c == SIGN_FUNCTION){
+                        O.Enqueue(NextLogic());
+                    }else if(c == '>' || c == '<'){
 
-                        SharkScriptUtil.ExtendList<string>(O,NextFunctionDefination());
-                        O.Add($"1END_DEFINE_FUNC_FILLVAR {varName}");
+                        O.Enqueue(NextCompare(characters.Dequeue().ToString()));
+                    }else if(SharkUtil.ContainsVal<char>(TokenSet.opComputeAssign,c)){
+
+                        O.Enqueue(NextComputeAssign(characters.Dequeue().ToString()));
+                    }else if(c == TokenSet.opAssign){
+
+                        O.Enqueue(NextEqual(characters.Dequeue().ToString()));
+                    }else if(SharkUtil.Contains<string>(TokenSet.opDouble,c.ToString())){
+
+                        O.Enqueue(new Token(TokenType.OPERATOR,characters.Dequeue().ToString()));
+                    }else if(SharkUtil.ContainsVal<char>(TokenSet.separations,c)){
+
+                        O.Enqueue(new Token(TokenType.SEPARATION,characters.Dequeue().ToString()));
+                    }else if(c == TokenSet.space || c == TokenSet.EOL || c == TokenSet.castR){
+
+                        characters.Dequeue();
                     }else{
-                        /* the invalid syntax */
-
-                        throw SharkScriptInvalidSyntax.defaultErr;
+                        throw new SharkTokenException($"unknown token sign {c.ToString()}");
                     }
-                }
-                char nextChar = characters.Dequeue();
-                if(nextChar != CODE_SEP){
-                    throw new SharkScriptInvalidSyntax("Shark语法错误，是否忘记写分号？");
-                }
-                if(characters.Peek() != FUNCTION_BODY_END){
-                    return __NextFunctionDefineBody(O);
                 }
                 return O;
-            }
-            private bool IsVarHead(char _){
-                return char.IsLetter(_) || _ == UNDERLINE;
-            }
-            public static bool ListElementEnding(char nextChar){
-                /* 列表元素结尾 */
-
-                return nextChar == LIST_END || nextChar == FUNCTION_PARAMS_SEP;
-            }
-            public static bool CodeSepEnding(char nextChar){
-
-                return nextChar == CODE_SEP;
-            }
-            public static Tuple<string[],string> HandleSourceCode(string[] lines){
-                /* 代码预处理器，将代码拆分为编译指令和控制代码两块，编译指令将直接在这里被转换为中间代码，
-                其余的代码将会生成一个新的string对象(移除不必要的空格) */
-
-                List<string> _IL = new List<string>();
-                string buf = string.Empty;
-                foreach(string line in lines){
-                    if(line.StartsWith("#")){
-                        _IL.Add(ParsePragma(line));
-                    }else{
-                        buf += HandleSingleLine(line.Trim());
-                    }
-                }
-                return new Tuple<string[], string>(_IL.ToArray(),buf);
-            }
-            public static string ParsePragma(string line){
-                /* 解析所有的编译指令并生成对应的中间代码 */
-
-                string[] parts = SharkScriptUtil.SplitStringWithWhiteSpace(line,2);
-                switch(parts[0].Trim()){
-                    case PRAGMA_API:
-                    return $"1LOAD_API {parts[1].Trim()}";
-                    case PRAGMA_BIND:
-                    return $"1BIND {parts[1].Trim()}";
-                }
-                throw new SharkBaseException("unknown pargma command");
-            }
-            public static string HandleSingleLine(string line){
-                /*移除所有的换行符与非字符串空格*/
-
-                string buf = string.Empty;
-                bool inString = false;
-                foreach(char c in line){
-                    if(inString || (c != SPACE && c != EOL)){
-                        buf += c.ToString();
-                        if(c == VAR_STRING){
-                            inString = !inString;
-                        }
-                    }
-                }
-                return buf;
             }
         }
     }
 
+    namespace SharkIL{
+        /* about the il code generator */
+
+        public enum NodeType{
+            /* the type of node */
+
+            ASSIGN,
+            OP,
+            VAR,
+            LITERAL,
+            FUNC,
+            LIST,
+            IF,
+            SUBIF,
+            ELSE,
+            LOOP,
+            DEF,
+            BLOCK,
+            ARGS,
+            INDEX,
+            RETURN,
+            BREAK,
+            NONE
+        }
+
+        public class NodeCnt{
+            /* NodeCnt contains a value type and a object type data
+            it can represent an operator ,a function call ,a literal 
+            or a variable. */
+
+            public static NodeCnt AssignNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.ASSIGN.ToString()),NodeType.ASSIGN);
+            public static NodeCnt ArgsNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.ARGS.ToString()),NodeType.ARGS);
+            public static NodeCnt ListNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.LIST.ToString()),NodeType.LIST);
+            public static NodeCnt FuncNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.FUNC.ToString()),NodeType.FUNC);
+            public static NodeCnt IfNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.IF.ToString()),NodeType.IF);
+            public static NodeCnt SubIfNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.SUBIF.ToString()),NodeType.SUBIF);
+            public static NodeCnt ElseNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.ELSE.ToString()),NodeType.ELSE);
+            public static NodeCnt WhileNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.LOOP.ToString()),NodeType.LOOP);
+            public static NodeCnt DefNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.DEF.ToString()),NodeType.DEF);
+            public static NodeCnt BlockNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.BLOCK.ToString()),NodeType.BLOCK);
+            public static NodeCnt IndexNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.INDEX.ToString()),NodeType.INDEX);
+            public static NodeCnt ReturnNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.RETURN.ToString()),NodeType.RETURN);
+            public static NodeCnt BreakNode = new NodeCnt(new Token(TokenType.VIRTUAL,NodeType.BREAK.ToString()),NodeType.BREAK);
+
+            public NodeType ndtype;
+            public Token token;
+
+            public NodeCnt(Token token,NodeType ndtype){
+                /* the node content */
+
+                this.token = token;
+                this.ndtype = ndtype;
+            }
+            public override string ToString()
+            {
+                return $"[{ndtype}:{token}]";
+            }
+        }
+
+        public class SharkASTree{
+            /* represent the abstract structure of procedure */
+
+            public SharkASTree[] nodes;
+            /* some code has more than one node, so here is a array type value
+            to record them, but usually we got two node in ASTree Node */
+
+            public NodeCnt content;
+            /* save code source used in this node */
+
+            public SharkASTree(Token token){
+                /* ASTree must contained single value at last 
+                @token: the function token marked by */
+
+                if(token.type == TokenType.OPERATOR){
+
+                    if(token.value == TokenSet.opAssign.ToString()){
+                        content = NodeCnt.AssignNode;
+                    }else{
+                        content = new NodeCnt(token,NodeType.OP);
+                    };
+                }else if(SharkUtil.ContainsVal<TokenType>(TokenSet.literal,token.type)){
+
+                    content = new NodeCnt(token,NodeType.LITERAL);
+                }else if(token.type == TokenType.ID){
+
+                    content = new NodeCnt(token,NodeType.VAR);
+                }else{
+
+                    throw new SharkException("该token无法单独作为一个节点创建");
+                }
+                nodes = new SharkASTree[2];
+            }
+            public SharkASTree(){
+                /* create empty list */
+
+                content = null;
+                nodes = null;
+            }
+            public NodeType NdType{
+
+                get{return content.ndtype;}
+            }
+            public bool IsOperator{
+                /*is op node */
+
+                get{return content.ndtype == NodeType.OP;}
+            }
+            public bool IsVarOrLiteral{
+                /* literal and anything with ID could be treat as Val*/
+
+                get{return content.ndtype == NodeType.VAR || content.ndtype == NodeType.LITERAL;}
+            }
+            public bool IsVarOrLiteralOrNone{
+
+                get{return content.ndtype == NodeType.VAR || content.ndtype == NodeType.LITERAL || content.ndtype == NodeType.NONE;}
+            }
+            public bool IsLiteral{
+                /* check if node is a constant value */
+
+                get{return content.ndtype == NodeType.LITERAL;}
+            }
+            public bool IsVar{
+                /* is an id type node */
+
+                get{return content.ndtype == NodeType.VAR;}
+            }
+            public int BlockSize{
+                /* get block size */
+
+                get{return nodes.Length;}
+            }
+            public void AddNode(SharkASTree node){
+                /* add a new node to this list */
+
+                SharkASTree[] newArr = new SharkASTree[nodes.Length + 1];
+                nodes.CopyTo(newArr,0);
+                newArr[nodes.Length] = node;
+                nodes = newArr;
+            }
+            public void DownExtend(Token value){
+                /* extend left node
+                LEFT !!!*/
+
+                nodes[0] = new SharkASTree(value);
+            }
+            public SharkASTree Left{
+                /* get left value */
+
+                get{return nodes[0];}
+                set{nodes[0] = value;}
+            }
+            public string Value{
+                get{return content.token.value;}
+            }
+            public string LeftValue{
+                get{return Left.content.token.value;}
+            }
+            public string RightValue{
+                get{return Right.content.token.value;}
+            }
+            public SharkASTree Right{
+                /* get right child node */
+
+                get{return nodes[1];}
+                set{nodes[1] = value;}
+            }
+            public override string ToString()
+            {
+                return content.ToString();
+            }
+            public static SharkASTree UpExtend(SharkASTree tree,Token value){
+                /* extend from this node */
+
+                SharkASTree UpNode = new SharkASTree(value);
+                UpNode.Left = tree;
+                return UpNode;
+            }
+            public static SharkASTree UpExtendAtRight(SharkASTree tree,Token value){
+
+                SharkASTree UpNode = new SharkASTree(value);
+                UpNode.Right = tree;
+                return UpNode;
+            }
+            public static SharkASTree CreateEmptyList(){
+                /* create a empty list */
+
+                SharkASTree O = new SharkASTree();
+                O.nodes = new SharkASTree[0];
+                O.content = NodeCnt.ListNode;
+                return O;
+            }
+            public static SharkASTree CreateArgsList(){
+
+                SharkASTree O = new SharkASTree();
+                O.nodes = new SharkASTree[0];
+                O.content = NodeCnt.ArgsNode;
+                return O;
+            }
+            public static SharkASTree CreateFunctionCall(Token IdToken){
+                /* create a function call node */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.FuncNode;
+                O.nodes = new SharkASTree[2];
+                O.Left = new SharkASTree(IdToken);
+                return O;
+            }
+            public static SharkASTree CreateFunctionCall(SharkASTree v){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.FuncNode;
+                O.nodes = new SharkASTree[2];
+                O.Left = v;
+                return O;
+            }
+            public static SharkASTree CreateFunctionDefination(string ID){
+                /* create a function defination */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.DefNode;
+                O.nodes = new SharkASTree[3];
+                O.nodes[0] = new SharkASTree(new Token(TokenType.ID,ID));
+                O.nodes[1] = SharkASTree.CreateEmptyList();
+                O.nodes[2] = SharkASTree.CreateEmptyList();
+                return O;
+            }
+            public static SharkASTree CreateCodeBlock(){
+                /* create en empty code block */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.BlockNode;
+                O.nodes = new SharkASTree[0];
+                return O;
+            }
+            public static SharkASTree CreateIFBlock(){
+                /* create en if code block */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.IfNode;
+                O.nodes = new SharkASTree[1];
+                return O;
+            }
+            public static SharkASTree CreateSubIfBlock(){
+                /* create an sub if block */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.SubIfNode;
+                O.nodes = new SharkASTree[2];
+                return O;
+            }
+            public static SharkASTree CreateWhileBlock(){
+                /* create an while block */
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.WhileNode;
+                O.nodes = new SharkASTree[2];
+                return O;
+            }
+            public static SharkASTree CreateElseBlock(){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.ElseNode;
+                O.nodes = new SharkASTree[1];
+                return O;
+            }
+            public static SharkASTree CreateIndex(SharkASTree list){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.IndexNode;
+                O.nodes = new SharkASTree[2];
+                O.Left = list;
+                return O;
+            }
+            public static SharkASTree CreateIndex(Token tk){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.IndexNode;
+                O.nodes = new SharkASTree[2];
+                O.Left = new SharkASTree(tk);
+                return O;
+            }
+            public static SharkASTree CreateReturnNode(){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.ReturnNode;
+                O.nodes = new SharkASTree[1];
+                return O;
+            }
+            public static SharkASTree CreateBreakNode(){
+
+                SharkASTree O = new SharkASTree();
+                O.content = NodeCnt.BreakNode;
+                O.nodes = new SharkASTree[0];
+                return O;
+            }
+            public static SharkASTree CreateNullNode(Token token){
+
+                SharkASTree O = new SharkASTree();
+                O.content = new NodeCnt(token,NodeType.NONE);
+                O.nodes = new SharkASTree[0];
+                return O;
+            }
+        }
+
+        public class CodeParser{
+            /* parse code and generate ast tree */
+
+            public Queue<Token> tokens;
+            public CodeParser(){
+
+                tokens = null;
+            }
+            public void LoadTokens(Queue<Token> tokens){
+
+                this.tokens = tokens;
+            }
+            public Token GetNextToken(bool isPop){
+
+                if(isPop){
+                    return tokens.Dequeue();
+                }
+                return tokens.Peek();
+            }
+            public SharkASTree NextArgs(){
+                /* find next args list */
+
+                SharkASTree O = SharkASTree.CreateArgsList();
+                if(GetNextToken(false).value == TokenSet.paranthesesRight.ToString()){
+                    GetNextToken(true);
+                    return O;
+                }
+                return __NextArgs(O);
+            }
+            public SharkASTree __NextArgs(SharkASTree O){
+                /* find next args list */
+
+                O.AddNode(NextLogicalExpression());
+                Token t = GetNextToken(true);
+                if(t.value == TokenSet.paranthesesRight.ToString()){
+                    return O;
+                }else if(t.value == TokenSet.listSeparation.ToString()){
+                    return __NextArgs(O);
+                }else{
+                    throw SharkCodeFormatException.defaultErr;
+                }
+            }
+            public SharkASTree NextList(string ending){
+                /* find next list type value, when we get a [ 
+                    @ending: ) or ]*/
+
+                SharkASTree O;
+                if(ending == TokenSet.listRight.ToString()){
+                    O = SharkASTree.CreateEmptyList();
+                }else{
+                    O = SharkASTree.CreateArgsList();
+                }
+                if(GetNextToken(false).value == ending){
+                    GetNextToken(true);
+                    Token t = GetNextToken(false);
+                    if(t.value == TokenSet.listLeft.ToString()){
+                        return NextIndex(O);
+                    }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                        return NextCall(O);
+                    }
+                    return O;
+                }else{
+                    return __NextList(O,ending);
+                }
+            }
+            public SharkASTree __NextList(SharkASTree O,string ending){
+                /* recurrent to call this function and get all element */
+
+                O.AddNode(NextLogicalExpression());
+                if(GetNextToken(false).value == TokenSet.listSeparation.ToString()){
+                    GetNextToken(true);
+                    return __NextList(O,ending);
+                }else if(GetNextToken(false).value == ending){
+                    GetNextToken(true);         //remove ]
+                    Token t = GetNextToken(false);
+                    if(t.value == TokenSet.listLeft.ToString()){
+                        return NextIndex(O);
+                    }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                        return NextCall(O);
+                    }
+                    return O;
+                }
+                throw SharkCodeFormatException.defaultErr;
+            }
+
+            public SharkASTree NextFactor(){
+                /* find next expression factor 
+                factor can be 1.function call, 2.function defination, 3.literal, 4.variable, 5.list and 6.sub expression */
+
+                Token token = GetNextToken(false);
+                if(SharkUtil.ContainsVal<TokenType>(TokenSet.literal,token.type)){
+                    /* literal */
+
+                    return new SharkASTree(GetNextToken(true));
+                }else if(token.value == TokenSet.listLeft.ToString()){
+                    /* list */
+
+                    GetNextToken(true);     //remove listLeft
+                    SharkASTree O = NextList(TokenSet.listRight.ToString());
+                    Token t = GetNextToken(false);
+                    if(t.value == TokenSet.listLeft.ToString()){
+                        GetNextToken(true);
+                        return NextIndex(O);
+                    }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                        GetNextToken(true);
+                        return NextCall(O);
+                    }
+                    return O;
+                }else if(token.value == TokenSet.paranthesesLeft.ToString()){
+                    /* sub expression */
+
+                    GetNextToken(true);
+                    SharkASTree O = NextLogicalExpression();
+                    CheckNextToken(TokenSet.paranthesesRight.ToString());
+                    if(GetNextToken(false).value == TokenSet.paranthesesLeft.ToString()){
+                        return NextCall(O);
+                    }else if(GetNextToken(false).value == TokenSet.listLeft.ToString()){
+                        return NextIndex(O);
+                    }
+                    return O;
+                }else if(token.type == TokenType.ID){
+                    /* variable & function call*/
+
+                    Token t = GetNextToken(true);//remove ID
+                    if(GetNextToken(false).value == TokenSet.paranthesesLeft.ToString()){
+                        return NextCall(t);
+                    }
+                    if(GetNextToken(false).value == TokenSet.listLeft.ToString()){
+                        return NextIndex(t);
+                    }
+                    return new SharkASTree(t);
+                }else if(token.value == TokenSet.funcDefination){
+                    /* function defination */
+
+                    GetNextToken(true); // remove @
+                    return NextDef();
+                }else if(token.value == TokenSet.opSub.ToString()){
+
+                    return NextSub(GetNextToken(true));
+                }else if(token.value == TokenSet.opNot.ToString()){
+
+                    return NextNot(GetNextToken(true));
+                }else if(token.value == TokenSet.sysNull){
+
+                    return NextNull(GetNextToken(true));
+                }else{
+                    throw new SharkCodeFormatException("错误的解析序列");
+                }
+            }
+            public SharkASTree NextNull(Token t){
+
+                return SharkASTree.CreateNullNode(t);
+            }
+            public SharkASTree NextNot(Token t){
+                /* not operator */
+
+                SharkASTree O = new SharkASTree();
+                O.content = new NodeCnt(t,NodeType.OP);
+                O.nodes = new SharkASTree[1];
+                O.Left = NextLogicalExpression();
+                return O;
+            }
+            public SharkASTree NextDef(){
+                /* find next function defination */
+
+                Token t = GetNextToken(true);
+                SharkASTree O;
+                if(t.type == TokenType.ID){
+                    O = SharkASTree.CreateFunctionDefination(t.value);
+                    CheckNextToken(TokenSet.paranthesesLeft.ToString());        //check (
+                    O.nodes[1] = NextList(TokenSet.paranthesesRight.ToString());
+                    CheckNextToken(TokenSet.blockLeft.ToString());             //check {
+                    O.nodes[2] = NextBlock();
+                    return O;
+                }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                    O = SharkASTree.CreateFunctionDefination(null);
+                    O.nodes[1] = NextList(TokenSet.paranthesesRight.ToString());
+                    CheckNextToken(TokenSet.blockLeft.ToString());
+                    O.nodes[2] = NextBlock();
+                    return O;
+                }else{
+                    throw SharkCodeFormatException.defaultErr;
+                }
+            }
+            public SharkASTree NextIndex(Token tk){
+                /* find next index block */
+
+                GetNextToken(true);       //remove [
+                SharkASTree O = SharkASTree.CreateIndex(tk);
+                O.Right = NextMathExpression();
+                CheckNextToken(TokenSet.listRight.ToString());// check ]
+                Token t = GetNextToken(false);
+                if(t.value == TokenSet.paranthesesLeft.ToString()){
+                    return NextCall(O);
+                }else if(t.value == TokenSet.listLeft.ToString()){
+                    return NextIndex(O);
+                }
+                return O;
+            }
+            public SharkASTree NextIndex(SharkASTree O){
+                /* find next index block */
+
+                GetNextToken(true);       //remove [
+                SharkASTree buf = SharkASTree.CreateIndex(O);
+                buf.Right = NextMathExpression();
+                CheckNextToken(TokenSet.listRight.ToString());      //remove ]
+                Token t = GetNextToken(false);
+                if(t.value == TokenSet.listLeft.ToString()){
+                    return NextIndex(buf);
+                }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                    return NextCall(buf);
+                }
+                return buf;
+            }
+            public SharkASTree NextCall(Token IdToken){
+                /* we get a ( after ID, so it looks like a function call 
+                @ID, the ID before ( */
+
+                GetNextToken(true); //remove (
+                SharkASTree O = SharkASTree.CreateFunctionCall(IdToken);
+                O.Right = NextArgs();
+                Token t = GetNextToken(false);
+                if(t.value == TokenSet.listLeft.ToString()){
+                    return NextIndex(O);
+                }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                    return NextCall(O);
+                }
+                return O;
+            }
+            public SharkASTree NextCall(SharkASTree func){
+
+                GetNextToken(true);
+                SharkASTree O = SharkASTree.CreateFunctionCall(func);
+                O.Right = NextArgs();
+                Token t = GetNextToken(false);
+                if(t.value == TokenSet.listLeft.ToString()){
+                    return NextIndex(O);
+                }else if(t.value == TokenSet.paranthesesLeft.ToString()){
+                    return NextCall(O);
+                }
+                return O;
+            }
+            public SharkASTree NextSingle(){
+                /* search for ^ */
+
+                SharkASTree O = NextFactor();
+                while(true){
+                    Token next = GetNextToken(false);
+                    if(next.value == TokenSet.opPow.ToString()){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextFactor();
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextSub(Token token){
+                /* search for - */
+
+                SharkASTree O = NextSingle();
+                SharkASTree _ = new SharkASTree();
+                _.content = new NodeCnt(token,NodeType.OP);
+                _.nodes = new SharkASTree[1];
+                _.Left = O;
+                return _;
+            }
+            public SharkASTree NextTerm(){
+                /* search for * and / */
+
+                SharkASTree O = NextSingle();
+                while(true){
+                    Token next = GetNextToken(false);
+                    if(next.value == TokenSet.opDiv.ToString() || next.value == TokenSet.opMul.ToString()
+                    || next.value == TokenSet.opMod.ToString()){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextSingle();
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextMathExpression(){
+                /* find next math expression */
+
+                SharkASTree O = NextTerm();
+                while(true){
+                    Token next = GetNextToken(false);
+                    if(next.value == TokenSet.opAdd.ToString() || next.value == TokenSet.opSub.ToString()){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextTerm();
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextCompareExpression(){
+                /* find next compare expression */
+
+                SharkASTree O = NextMathExpression();
+                while(true){
+                    Token next = GetNextToken(false);
+                    if(SharkUtil.Contains<string>(TokenSet.opCompare,next.value)){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextMathExpression();
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextLogicalExpression(){
+                /* find next compare expression */
+
+                SharkASTree O = NextCompareExpression();
+                while(true){
+                    Token next = GetNextToken(false);
+                    if(SharkUtil.Contains<string>(TokenSet.opLogic,next.value)){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextCompareExpression();
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextAssignExpression(){
+                /* find next assign expression */
+
+                SharkASTree O = NextLogicalExpression();
+                if(O.IsVarOrLiteral){
+                    Token next = GetNextToken(false);
+                    if(SharkUtil.Contains<string>(TokenSet.opAssigns,next.value)){
+                        O = SharkASTree.UpExtend(O,GetNextToken(true));
+                        O.Right = NextLogicalExpression();
+                        if(next.value != TokenSet.opAssigns[0]){
+                            O.content.token = new Token(TokenType.OPERATOR,O.Value.Substring(0,1));
+                            SharkASTree buf = SharkASTree.UpExtend(O.Left,new Token(TokenType.OPERATOR,TokenSet.opAssign.ToString()));
+                            buf.Right = O;
+                            O = buf;
+                        }
+                    }else{
+                        throw SharkCodeFormatException.defaultErr;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextOperation(){
+                /* find next assign until ; 
+                operation is the base unit of the block, and block is combined 
+                with if block, while block,function defination */
+
+                SharkASTree O = NextAssignExpression();
+                Token token = GetNextToken(true);
+                if(token.value == TokenSet.codeSeparation.ToString()){
+                    return O;
+                }
+                throw new SharkCodeFormatException("语法异常，是否忘记了写分号");
+            }
+            public SharkASTree NextBlock(){
+                /* start with { and endwith } */
+
+                SharkASTree O = SharkASTree.CreateCodeBlock();
+                if(GetNextToken(false).value == TokenSet.blockRight.ToString()){
+                    GetNextToken(true);     //remove }
+                    return O;
+                }
+                return __NextBlock(O);
+            }
+            public SharkASTree __NextBlock(SharkASTree O){
+                /* end with } */
+
+                while(true){
+                    Token tk = GetNextToken(false);
+                    if(tk.value == TokenSet.sysIf){
+
+                        GetNextToken(true);     //remove sign 'if'
+                        O.AddNode(NextIfBlock());
+                    }else if(tk.value == TokenSet.sysWhile){
+
+                        GetNextToken(true);     //remove sign 'while'
+                        O.AddNode(NextWhileBlock());
+                    }else if(tk.value == TokenSet.blockRight.ToString()){
+
+                        GetNextToken(true);     //remove }
+                        break;
+                    }else if(tk.value == TokenSet.codeSeparation.ToString()){
+
+                        GetNextToken(true);
+                    }else if(tk.type == TokenType.ID){
+
+                        O.AddNode(NextOperation());
+                    }else if(tk.value == TokenSet.sysReturn){
+
+                        GetNextToken(true);
+                        //O.AddNode(NextLogicalExpression());
+                        SharkASTree _ = SharkASTree.CreateReturnNode();
+                        _.Left = NextLogicalExpression();
+                        O.AddNode(_);
+                    }else if(tk.value == TokenSet.sysBreak){
+
+                        GetNextToken(true);
+                        SharkASTree _ = SharkASTree.CreateBreakNode();
+                        O.AddNode(_);
+                    }else if(tk.value == TokenSet.funcDefination){
+
+                        GetNextToken(true); //remove function
+                        O.AddNode(NextDef());
+                    }else{
+                        throw SharkCodeFormatException.defaultErr;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextWhileBlock(){
+                /* find while block */
+
+                SharkASTree O = SharkASTree.CreateWhileBlock();
+                // (condition expression)
+                CheckNextToken(TokenSet.paranthesesLeft.ToString());
+                O.Left = NextLogicalExpression();
+                CheckNextToken(TokenSet.paranthesesRight.ToString());
+
+                //{block}
+                CheckNextToken(TokenSet.blockLeft.ToString());
+                O.Right = NextBlock();
+                return O;
+            }
+            public SharkASTree NextIfBlock(){
+                /* when we get a 'if', this function will be called 
+                to find the complete */
+
+                SharkASTree O = SharkASTree.CreateIFBlock();
+                O.Left = NextSubIfBlock();
+                while(tokens.Count > 0){
+                    /* the block should not check if tokens has run out*/
+
+                    Token tk = GetNextToken(false);
+                    if(tk.value == TokenSet.sysElif){
+
+                        GetNextToken(true);         //remove elif
+                        O.AddNode(NextSubIfBlock());
+                    }else if(tk.value == TokenSet.sysElse){
+
+                        GetNextToken(true);         //remove else
+                        O.AddNode(NextElseBlock());
+                        break;
+                    }else{
+                        break;
+                    }
+                }
+                return O;
+            }
+            public SharkASTree NextSubIfBlock(){
+                /* find next subif block */
+
+                SharkASTree O = SharkASTree.CreateSubIfBlock();
+                //(condition expression)
+                CheckNextToken(TokenSet.paranthesesLeft.ToString());
+                O.Left = NextLogicalExpression();
+                CheckNextToken(TokenSet.paranthesesRight.ToString());
+
+                //{block}
+                CheckNextToken(TokenSet.blockLeft.ToString());
+                O.Right = NextBlock();
+                return O;
+            }
+            public SharkASTree NextElseBlock(){
+
+                SharkASTree O = SharkASTree.CreateElseBlock();
+                CheckNextToken(TokenSet.blockLeft.ToString());
+                O.Left = NextBlock();
+                return O;
+            }
+
+            public SharkASTree GenAST(){
+                /* generate ast from given tokens */
+
+                SharkASTree O = SharkASTree.CreateCodeBlock();
+                while(tokens.Count > 0){
+                    Token tk = GetNextToken(false);
+                    if(tk.value == TokenSet.sysIf){
+                        GetNextToken(true);
+                        O.AddNode(NextIfBlock());
+                    }else if(tk.value == TokenSet.sysWhile){
+                        GetNextToken(true);
+                        O.AddNode(NextWhileBlock());
+                    }else if(tk.value == TokenSet.codeSeparation.ToString()){
+                        GetNextToken(true);
+                    }else if(tk.type == TokenType.ID){
+                        O.AddNode(NextOperation());
+                    }else if(tk.value == TokenSet.funcDefination){
+                        GetNextToken(true);
+                        O.AddNode(NextDef());
+                    }else if(tk.value == TokenSet.listLeft.ToString()){
+                        GetNextToken(true);
+                        O.AddNode(NextList(TokenSet.listRight.ToString()));
+                    }else{
+                        throw SharkCodeFormatException.defaultErr;
+                    }
+                }
+                return O;
+            }
+
+            public void CheckNextToken(string sign){
+
+                if(GetNextToken(true).value != sign){
+                    throw SharkCodeFormatException.defaultErr;
+                }
+            }
+        }
+    
+        public enum OpCode{
+            move,
+            load_const,
+            load_var,
+            push,
+            push_var,
+            push_const,
+            push_func,
+            pusho_func,
+            pop_op,
+            pop_list,
+            pop,
+            pop_var,
+            index,
+            list,
+            call,
+            _goto,
+            jmp,
+            assign,
+            def,
+            enddef,
+            add_param,
+            add_code,
+            ret,
+            con,
+            load_null,
+            push_null,
+            opneg,
+            opadd,
+            opsub,
+            opmul,
+            opdiv,
+            oppow,
+            opmod,
+            opgt,
+            oplt,
+            opge,
+            ople,
+            opeq,
+            opne,
+            opand,
+            opor,
+            opnot,
+        }
+
+        public class opParams{
+            /* save the parameters needed in target operation */
+
+            public static opParams empty = null;
+            public byte position;
+            public int constId;
+            public string variableId;
+            public opParams nextArgs;
+
+            public opParams(byte position,int constId){
+                this.position = position;
+                this.constId = constId;
+                this.variableId = null;
+                this.nextArgs = null;
+            }
+            public opParams(byte position,int constId,string variableId){
+
+                this.position = position;
+                this.constId = constId;
+                this.variableId = variableId;
+                this.nextArgs = null;
+            }
+            public opParams(byte position,int constId,string variableId,opParams args){
+
+                this.position = position;
+                this.constId = constId;
+                this.variableId = variableId;
+                this.nextArgs = args;
+            }
+            public SharkCommand ReleaseNextCommand(){
+                /* release a new command */
+
+                return new SharkCommand(position,nextArgs);
+            }
+            public override string ToString()
+            {
+                if(nextArgs == null){
+                    return $"{position},{constId},{variableId}";
+                }
+                return $"{((OpCode)position).ToString()} {nextArgs}";
+            }
+            public string CvtString(bool isWriteCode){
+
+                if(isWriteCode){
+                    if(nextArgs == null){
+                        return $"{((OpCode)position).ToString()}";
+                    }
+                    return $"{((OpCode)position).ToString()} {nextArgs.CvtString((OpCode)position == OpCode.add_code)}";
+                }
+                return $"{position},{constId},{variableId}";
+            }
+        }
+
+        public struct SharkCommand{
+            /* represent a il command */
+
+            public opParams opArgs;
+            public byte opCode;
+
+            public static SharkCommand String2Command_double(string src){
+
+                switch(src){
+                    case "+":
+                    return SharkCommand.Add;
+                    case "-":
+                    return SharkCommand.Sub;
+                    case "*":
+                    return SharkCommand.Mul;
+                    case "/":
+                    return SharkCommand.Div;
+                    case "%":
+                    return SharkCommand.Mod;
+                    case "^":
+                    return SharkCommand.Pow;
+                    case ">":
+                    return SharkCommand.Gt;
+                    case "<":
+                    return SharkCommand.Lt;
+                    case ">=":
+                    return SharkCommand.Ge;
+                    case "<=":
+                    return SharkCommand.Le;
+                    case "!=":
+                    return SharkCommand.Ne;
+                    case "==":
+                    return SharkCommand.Eq;
+                    case "&&":
+                    return SharkCommand.And;
+                    case "||":
+                    return SharkCommand.Or;
+                    case "!":
+                    return SharkCommand.Not;
+                }
+                throw new SharkException($"未知的符号:{src}");
+            }
+
+            public static SharkCommand Push = new SharkCommand((byte)OpCode.push,opParams.empty);
+            public static SharkCommand PushOFunc = new SharkCommand((byte)OpCode.pusho_func,opParams.empty);
+            public static SharkCommand PopOp = new SharkCommand((byte)OpCode.pop_op,opParams.empty);
+            public static SharkCommand PopList = new SharkCommand((byte)OpCode.pop_list,opParams.empty);
+            public static SharkCommand Index = new SharkCommand((byte)OpCode.index,opParams.empty);
+            public static SharkCommand MakeList = new SharkCommand((byte)OpCode.list,opParams.empty);
+            public static SharkCommand Call = new SharkCommand((byte)OpCode.call,opParams.empty);
+            public static SharkCommand Def = new SharkCommand((byte)OpCode.def,opParams.empty);
+            public static SharkCommand EndDef = new SharkCommand((byte)OpCode.enddef,opParams.empty);
+            public static SharkCommand Neg = new SharkCommand((byte)OpCode.opneg,opParams.empty);
+            public static SharkCommand Add = new SharkCommand((byte)OpCode.opadd,opParams.empty);
+            public static SharkCommand Sub = new SharkCommand((byte)OpCode.opsub,opParams.empty);
+            public static SharkCommand Mul = new SharkCommand((byte)OpCode.opmul,opParams.empty);
+            public static SharkCommand Div = new SharkCommand((byte)OpCode.opdiv,opParams.empty);
+            public static SharkCommand Mod = new SharkCommand((byte)OpCode.opmod,opParams.empty);
+            public static SharkCommand Gt = new SharkCommand((byte)OpCode.opgt,opParams.empty);
+            public static SharkCommand Lt = new SharkCommand((byte)OpCode.oplt,opParams.empty);
+            public static SharkCommand Ge = new SharkCommand((byte)OpCode.opge,opParams.empty);
+            public static SharkCommand Le = new SharkCommand((byte)OpCode.ople,opParams.empty);
+            public static SharkCommand Eq = new SharkCommand((byte)OpCode.opeq,opParams.empty);
+            public static SharkCommand Ne = new SharkCommand((byte)OpCode.opne,opParams.empty);
+            public static SharkCommand Pow = new SharkCommand((byte)OpCode.oppow,opParams.empty);
+            public static SharkCommand And = new SharkCommand((byte)OpCode.opand,opParams.empty);
+            public static SharkCommand Or = new SharkCommand((byte)OpCode.opor,opParams.empty);
+            public static SharkCommand Not = new SharkCommand((byte)OpCode.opnot,opParams.empty);
+            public static SharkCommand Return = new SharkCommand((byte)OpCode.ret,opParams.empty);
+            public static SharkCommand PushNull = new SharkCommand((byte)OpCode.push_null,opParams.empty);
+
+            public SharkCommand(byte code,opParams args){
+
+                opCode = code;
+                opArgs = args;
+            }
+            public opParams ToParams(){
+
+                return new opParams(opCode,0,null,opArgs);
+            }
+            public static SharkCommand Build(OpCode code,byte pos,int constId,string variableId){
+
+                return new SharkCommand((byte)code,new opParams(pos,constId,variableId));
+            }
+            public override string ToString()
+            {
+                if(opArgs == null){
+                    return $"[{((OpCode)opCode).ToString()}: ]";
+                }
+                return $"[{((OpCode)opCode).ToString()}: {opArgs.CvtString(opCode == 21)}]";
+            }
+        }
+
+        public class SharkILGenerator{
+            /* used to generate shark il code */
+
+            public List<SharkCommand> commandBuffer;
+            public List<SharkCommand> constantList;
+            int ifLvl;
+            int whileLvl;
+            
+            public List<SkFunc> funcList;
+            Stack<List<int>> breakPositions;
+
+
+            public Tuple<List<SharkCommand>,List<SharkCommand>> GenForScript(SharkASTree program){
+
+                commandBuffer = new List<SharkCommand>();
+                constantList = new List<SharkCommand>();
+                funcList = new List<SkFunc>();
+                ifLvl = 0;
+                GenForBlock(program);
+                return new Tuple<List<SharkCommand>, List<SharkCommand>>(commandBuffer,constantList);
+            }
+            public SharkILGenerator(){
+
+                commandBuffer = new List<SharkCommand>();
+                constantList = new List<SharkCommand>();
+                breakPositions = new Stack<List<int>>();
+                ifLvl = 0;
+            }
+            public int GetConstantId(Token tk){
+                /* search constant in target list */
+
+                for(int i = 0;i < constantList.Count;i++){
+                    if(constantList[i].opArgs.variableId == tk.value){
+                        return i;
+                    }
+                }
+                constantList.Add(SharkCommand.Build(OpCode.con,(byte)tk.type,0,tk.value));
+                return constantList.Count - 1;
+            }
+            public void HandleVal(SharkASTree valNode){
+                /* if no position has been sent, then target value 
+                will be pushed into list stack */
+
+                if(valNode.content.token.type == TokenType.ID){
+                    commandBuffer.Add(SharkCommand.Build(OpCode.push_var,0,0,valNode.Value));
+                }else if(valNode.NdType == NodeType.NONE){
+                    commandBuffer.Add(SharkCommand.PushNull);
+                }else{
+                    commandBuffer.Add(SharkCommand.Build(OpCode.push_const,0,GetConstantId(valNode.content.token),null));
+                }
+            }
+            public void HandleVal(SharkASTree valNode,byte pos){
+                /* push value into target register */
+
+                if(valNode.content.token.type == TokenType.ID){
+                    commandBuffer.Add(SharkCommand.Build(OpCode.load_var,pos,0,valNode.Value));
+                }else if(valNode.NdType == NodeType.NONE){
+                    commandBuffer.Add(SharkCommand.Build(OpCode.load_null,pos,0,null));
+                }else{
+                    commandBuffer.Add(SharkCommand.Build(OpCode.load_const,pos,GetConstantId(valNode.content.token),null));
+                }
+            }
+            public void HandleOperator(SharkASTree opNode){
+                /* generate il code for operator node */
+
+                if(opNode.NdType == NodeType.OP){
+                    GenForOperator(opNode);
+                }else if(opNode.NdType == NodeType.FUNC){
+                    GenForFunc(opNode);
+                }else if(opNode.NdType == NodeType.INDEX){
+                    GenForIndex(opNode);
+                }else{
+                    throw new SharkCodeFormatException("不支持的运算数");
+                }
+            }
+            public void HandleConditionExpr(SharkASTree O){
+
+                SharkCommand moveResult2Condition = SharkCommand.Build(OpCode.move,3,2,null);
+                if(O.Left.NdType == NodeType.INDEX){
+
+                    GenForIndex(O.Left);
+                    commandBuffer.Add(moveResult2Condition);
+                }else if(O.Left.NdType == NodeType.OP){
+
+                    GenForOperator(O.Left);
+                    commandBuffer.Add(moveResult2Condition);
+                }else if(O.Left.NdType == NodeType.FUNC){
+
+                    GenForFunc(O.Left);
+                    commandBuffer.Add(moveResult2Condition);
+                }else if(O.Left.IsVarOrLiteral){
+
+                    HandleVal(O.Left,2);
+                }else{
+                    
+                    throw new SharkCodeFormatException("不支持的条件表达式");
+                }
+            }
+            public void GenForBlock(SharkASTree O){
+                /* generate il code for block node */
+
+                SharkASTree subNode;
+                for(int i = 0;i < O.BlockSize;i++){
+                    /* iter for sub nodes */
+
+                    subNode = O.nodes[i];
+                    if(subNode.NdType == NodeType.ASSIGN){
+                        GenForAssign(subNode);
+                    }else if(subNode.NdType == NodeType.FUNC){
+                        GenForFunc(subNode);
+                    }else if(subNode.NdType == NodeType.IF){
+                        GenForIF(subNode);
+                    }else if(subNode.NdType == NodeType.LOOP){
+                        GenForWhile(subNode);
+                    }else if(subNode.NdType == NodeType.RETURN){
+                        GenForReturnNode(subNode);
+                    }else if(subNode.NdType == NodeType.DEF){
+                        GenForDefination(subNode);
+                    }else if(subNode.NdType == NodeType.BREAK){
+                        GenForBreak(subNode);
+                    }else{
+                        /* do nothing for other node */
+                    }
+                }
+            }
+            public void GenForReturnNode(SharkASTree O){
+                /* defination a new function */
+
+                if(O.Left.IsVar){
+                    /* 如果函数直接返回一个变量或者值，则该值应该被添加到结果寄存器 */
+
+                    commandBuffer.Add(SharkCommand.Build(OpCode.load_var,3,0,O.LeftValue));
+                }else if(O.Left.IsLiteral){
+
+                    commandBuffer.Add(SharkCommand.Build(OpCode.load_const,3,GetConstantId(O.Left.content.token),null));
+                }else{
+
+                    if(O.Left.NdType == NodeType.INDEX){
+                        GenForIndex(O.Left);
+                    }else if(O.Left.NdType == NodeType.DEF){
+                        GenForDefination(O.Left);
+                    }else if(O.Left.NdType == NodeType.FUNC){
+                        GenForFunc(O.Left);
+                    }else if(O.Left.NdType == NodeType.LIST){
+                        GenForList(O.Left,false);
+                    }else if(O.Left.NdType == NodeType.OP){
+                        GenForOperator(O.Left);
+                    }else{
+                        throw new SharkException("错误的返回值");
+                    }
+                }
+                /* 其他类型的节点计算的结果都会自动加到结果寄存器中 */
+                commandBuffer.Add(SharkCommand.Return);
+            }
+            public void GenForIF(SharkASTree O){
+
+                ifLvl ++;
+                int endPoint = O.BlockSize - 1;
+                List<int> gotoCmds = new List<int>();
+                for(int i = 0;i < O.BlockSize;i ++){
+                    GenForSubIf(O.nodes[i],O.BlockSize);
+                    if(i != endPoint){
+                        gotoCmds.Add(commandBuffer.Count);
+                    }
+                }
+                int addrOut = commandBuffer.Count + gotoCmds.Count + ifLvl - 1;
+                for(int i = 0;i < gotoCmds.Count;i ++){
+                    commandBuffer.Insert(gotoCmds[i] + i,SharkCommand.Build(OpCode._goto,0,addrOut,null));
+                }
+                ifLvl --;
+            }
+            public void GenForSubIf(SharkASTree O,int count){
+
+                SharkCommand moveResult2Condition = SharkCommand.Build(OpCode.move,3,2,null);
+                if(O.NdType == NodeType.SUBIF){
+                    HandleConditionExpr(O);
+                    int addrNow = commandBuffer.Count;
+                    GenForBlock(O.Right);
+                    int offset = commandBuffer.Count - addrNow;
+                    commandBuffer.Insert(addrNow,SharkCommand.Build(OpCode.jmp,0,offset + (count == 1?0:1),null));
+                }else{
+                    GenForBlock(O.Left);
+                }
+            }
+            public void GenForBreak(SharkASTree O){
+
+                breakPositions.Peek().Add(commandBuffer.Count);
+                commandBuffer.Add(SharkCommand.Build(OpCode._goto,0,0,null));
+            }
+            public void GenForWhile(SharkASTree O){
+
+                whileLvl ++;
+                breakPositions.Push(new List<int>());
+                int addrStart = commandBuffer.Count - 1;
+                HandleConditionExpr(O);
+                int addrBodyStart = commandBuffer.Count;
+                GenForBlock(O.Right);
+                commandBuffer.Insert(addrBodyStart,SharkCommand.Build(OpCode.jmp,0,commandBuffer.Count - addrBodyStart + 1,null));
+                commandBuffer.Add(SharkCommand.Build(OpCode._goto,0,addrStart + whileLvl - 1,null));
+                List<int> poses = breakPositions.Pop();
+                int whileOut = commandBuffer.Count - 1;
+                for(int i = 0;i < poses.Count;i ++){
+                    commandBuffer[poses[i] + 2].opArgs.constId = whileOut + whileLvl - 1;
+                }
+                whileLvl --;
+            }
+            public void GenForAssign(SharkASTree O){
+
+                if(O.Left.IsVar){
+                    if(O.Right.IsVar){
+                        commandBuffer.Add(SharkCommand.Build(OpCode.load_var,0,0,O.LeftValue));
+                    }else if(O.Right.IsLiteral){
+                        commandBuffer.Add(SharkCommand.Build(OpCode.assign,0,GetConstantId(O.Right.content.token),O.LeftValue));
+                        return;
+                    }else{
+                        if(O.Right.NdType == NodeType.OP){
+                            GenForOperator(O.Right);
+                        }else if(O.Right.NdType == NodeType.FUNC){
+                            GenForFunc(O.Right);
+                        }else if(O.Right.NdType == NodeType.LIST){
+                            GenForList(O.Right,false);
+                        }else if(O.Right.NdType == NodeType.DEF){
+                            GenForDefination(O.Right);
+                        }else if(O.Right.NdType == NodeType.INDEX){
+                            GenForIndex(O.Right);
+                        }else if(O.Right.NdType == NodeType.NONE){
+                            HandleVal(O.Right,3);
+                        }else{
+                            throw new SharkCodeFormatException("不支持的操作");
+                        }
+                    }
+                    commandBuffer.Add(SharkCommand.Build(OpCode.pop_var,0,0,O.LeftValue));
+                    return;
+                }
+                throw new SharkCodeFormatException("不能给非变量对象赋值");
+            }
+            public void GenForDefination(SharkASTree O){
+                /* define a new function 
+                创建一个空的函数对象，然后向其中写入变量和指令代码 */
+                
+                commandBuffer.Add(SharkCommand.Def);        //这条指令会让虚拟机在脚本中创建一个函数的原型
+                for(int i = 0;i < O.Right.BlockSize;i ++){
+                    //将参数名写入函数的参数名列表
+                    commandBuffer.Add(SharkCommand.Build(OpCode.add_param,0,0,O.Right.nodes[i].Value));
+                }
+                List<SharkCommand> tmp = commandBuffer;
+                commandBuffer = new List<SharkCommand>();
+
+                GenForBlock(O.nodes[2]);//为函数体生成指令代码
+                foreach(SharkCommand cmd in commandBuffer){
+                    tmp.Add(new SharkCommand((byte)OpCode.add_code,cmd.ToParams()));
+                }
+                tmp.Add(SharkCommand.EndDef);
+                if(O.LeftValue != null){
+                    tmp.Add(SharkCommand.Build(OpCode.pop_var,0,0,O.LeftValue));
+                }
+                commandBuffer = tmp;
+            }
+            public void GenForIndex(SharkASTree O){
+
+                if(O.Left.NdType == NodeType.LIST){
+                    GenForList(O.Left,false);
+                }else if(O.Left.NdType == NodeType.FUNC){
+                    GenForFunc(O.Left);
+                }else if(O.Left.NdType == NodeType.INDEX){
+                    GenForIndex(O.Left);
+                }else if(O.Left.IsVar){
+                    HandleVal(O.Left,0);
+                }else{
+                    throw new SharkCodeFormatException("不支持的索引对象");
+                }
+                SharkCommand Pop0 = SharkCommand.Build(OpCode.pop,0,0,null);
+                if(O.Right.NdType == NodeType.FUNC){
+                    commandBuffer.Add(SharkCommand.Push);
+                    GenForFunc(O.Right);
+                    commandBuffer.Add(Pop0);
+                }else if(O.Right.NdType == NodeType.INDEX){
+
+                    commandBuffer.Add(SharkCommand.Push);
+                    GenForIndex(O.Right);
+                    commandBuffer.Add(Pop0);
+                }else if(O.Right.NdType == NodeType.OP){
+
+                    commandBuffer.Add(SharkCommand.Push);
+                    GenForOperator(O.Right);
+                    commandBuffer.Add(Pop0);
+                }else if(O.Right.IsVarOrLiteral){
+
+                    commandBuffer.Add(SharkCommand.Build(OpCode.move,0,3,null));
+                    HandleVal(O.Right,1);
+                }
+                commandBuffer.Add(SharkCommand.Index);
+            }
+            public void GenForOperator(SharkASTree O){
+
+                if(O.Left.IsVarOrLiteralOrNone && O.Right.IsVarOrLiteralOrNone){
+                    HandleVal(O.Left,0);
+                    HandleVal(O.Right,1);
+                }else if(O.Left.IsVarOrLiteral){
+
+                    HandleOperator(O.Right);
+                    commandBuffer.Add(SharkCommand.Build(OpCode.move,3,1,null));
+                    HandleVal(O.Left,0);
+                }else if(O.Right.IsVarOrLiteral){
+
+                    HandleOperator(O.Left);
+                    commandBuffer.Add(SharkCommand.Build(OpCode.move,3,1,null));
+                    HandleVal(O.Right,0);
+                }else{
+                    HandleOperator(O.Left);
+                    commandBuffer.Add(SharkCommand.PopOp);      //压入运算数栈
+                    HandleOperator(O.Right);
+                    commandBuffer.Add(SharkCommand.Build(OpCode.move,3,1,null));
+                    commandBuffer.Add(SharkCommand.Build(OpCode.pop,0,0,null));
+
+                }
+                commandBuffer.Add(SharkCommand.String2Command_double(O.Value));
+            }
+            public void GenForFunc(SharkASTree O){
+                /* generate il code for op node */
+
+
+                if(O.Left.IsVar){
+                    commandBuffer.Add(SharkCommand.Build(OpCode.push_func,0,0,O.LeftValue));
+                }else if(O.Left.NdType == NodeType.FUNC){
+                    GenForFunc(O.Left);
+                    commandBuffer.Add(SharkCommand.PushOFunc);
+                }else if(O.Left.NdType == NodeType.INDEX){
+                    GenForIndex(O.Left);
+                    commandBuffer.Add(SharkCommand.PushOFunc);
+                }else{
+                    throw new SharkCodeFormatException("无法执行的对象");
+                }
+                GenForList(O.Right,true);
+                commandBuffer.Add(SharkCommand.Call);
+            }
+            public void GenForList(SharkASTree O,bool isParamsList){
+
+                commandBuffer.Add(SharkCommand.MakeList);
+                SharkASTree subNode;
+                for(int i = 0;i < O.BlockSize;i++){
+                    subNode = O.nodes[i];
+                    if(subNode.IsOperator){
+                        /* 运算符类型的操作数 */
+
+                        GenForOperator(subNode);
+                        commandBuffer.Add(SharkCommand.Push);
+                    }else if(subNode.IsVarOrLiteral){
+
+                        HandleVal(subNode);
+                    }else if(subNode.NdType == NodeType.INDEX){
+
+                        GenForIndex(subNode);
+                        commandBuffer.Add(SharkCommand.Push);
+                    }else if(subNode.NdType == NodeType.FUNC){
+
+                        GenForFunc(subNode);
+                        commandBuffer.Add(SharkCommand.Push);
+                    }else if(subNode.NdType == NodeType.DEF){
+
+                        GenForDefination(subNode);
+                        commandBuffer.Add(SharkCommand.Push);
+                    }else if(subNode.NdType == NodeType.LIST){
+
+                        GenForList(subNode,false);
+                        commandBuffer.Add(SharkCommand.Push);
+                    }else if(subNode.NdType == NodeType.NONE){
+
+                        commandBuffer.Add(SharkCommand.PushNull);
+                    }else{
+                        throw new SharkCodeFormatException("不支持的列表元素");
+                    }
+                }
+                if(!isParamsList){
+                    commandBuffer.Add(SharkCommand.PopList);
+                }
+            }
+        }
+
+        public class ILGenerator{
+            /* used to generate shark il code */
+
+            public List<string> commandBuffer;
+            public List<string> constantList;
+
+            int ifLvl;
+
+            public ILGenerator(){
+                commandBuffer = new List<string>();
+                constantList = new List<string>();
+                ifLvl = 0;
+            }
+            public int SearchConstant(string constant){
+
+                for(int i = 0;i < constantList.Count;i++){
+                    if(constantList[i] == constant){
+                        return i;
+                    }
+                }
+                return -1;
+            }
+            public int GetConstantId(string constant){
+
+                int index = SearchConstant(constant);
+                if(index == -1){
+                    constantList.Add(constant);
+                    return constantList.Count - 1;
+                }
+                return index;
+            }
+            public void HandleVal(SharkASTree valNode){
+                /* if no position has been sent, then target value 
+                will be pushed into list stack */
+
+                if(valNode.content.token.type == TokenType.ID){
+                    commandBuffer.Add($"push_var {valNode.Value}");
+                }else{
+                    commandBuffer.Add($"push_const {GetConstantId(valNode.Value)}");
+                }
+            }
+            public void HandleVal(SharkASTree valNode,int pos){
+                /* if you point a position for target variable name
+                then the value will be moved into register */
+ 
+                if(valNode.content.token.type == TokenType.ID){
+                    commandBuffer.Add($"load_var {pos} {valNode.Value}");
+                }else{
+                    commandBuffer.Add($"load_const {pos} {GetConstantId(valNode.Value)}");
+                }
+            }
+            public void HandleOperator(SharkASTree opNode){
+                /* generate il code for operator node */
+
+                if(opNode.NdType == NodeType.OP){
+                    GenForOperator(opNode);
+                }else if(opNode.NdType == NodeType.FUNC){
+                    GenForFunc(opNode);
+                }else if(opNode.NdType == NodeType.INDEX){
+                    GenForIndex(opNode);
+                }else{
+                    throw new SharkCodeFormatException("不支持的运算数");
+                }
+            }
+            public void GenForBlock(SharkASTree block){
+                /* generate il code for block node */
+
+                SharkASTree subNode;
+                for(int i = 0;i < block.BlockSize;i++){
+                    /* iter for sub nodes */
+
+                    subNode = block.nodes[i];
+                    if(subNode.NdType == NodeType.ASSIGN){
+                        GenForAssign(subNode);
+                    }else if(subNode.NdType == NodeType.FUNC){
+                        GenForFunc(subNode);
+                    }else if(subNode.NdType == NodeType.IF){
+                        GenForIF(subNode);
+                    }else if(subNode.NdType == NodeType.LOOP){
+                        GenForWhile(subNode);
+                    }else if(subNode.NdType == NodeType.RETURN){
+                        GenForReturnNode(subNode);
+                    }else if(subNode.NdType == NodeType.DEF){
+                        GenForDefination(subNode);
+                    }else{
+                        /* do nothing for other node */
+                    }
+                }
+            }
+            public void GenForReturnNode(SharkASTree returnNode){
+                /* generate il code for return node */
+
+                commandBuffer.Add("return");
+            }
+            public void GenForIF(SharkASTree ifBlock){
+                /* generate il code for if block */
+
+                ifLvl ++;
+                List<int> gotoCmds = new List<int>();
+                for(int i = 0;i < ifBlock.BlockSize;i++){
+                    GenForSubIf(ifBlock.nodes[i]);
+                    if(i != ifBlock.BlockSize - 1){
+                        gotoCmds.Add(commandBuffer.Count);
+                    }
+                }
+                int addrOut = commandBuffer.Count + gotoCmds.Count + (ifLvl - 1);
+                for(int i = 0;i < gotoCmds.Count;i++){
+                    commandBuffer.Insert(gotoCmds[i] + i,$"goto {addrOut}");
+                }
+                ifLvl --;
+            }
+            public void GenForSubIf(SharkASTree subIfNode){
+                /* generate il code for sub if block */
+
+                if(subIfNode.NdType == NodeType.SUBIF){
+                    /* if condition is true, then jmp 0 */
+
+                    if(subIfNode.Left.NdType == NodeType.OP){
+                        /* compute a boolean value according to operation */
+
+                        GenForOperator(subIfNode.Left);
+                        commandBuffer.Add("move 3 2");
+                    }else if(subIfNode.Left.NdType == NodeType.INDEX){
+
+                        GenForIndex(subIfNode.Left);
+                        commandBuffer.Add("move 3 2");
+                    }else if(subIfNode.Left.IsVarOrLiteral){
+
+                        HandleVal(subIfNode.Left,2);
+                    }else if(subIfNode.Left.NdType == NodeType.FUNC){
+
+                        GenForFunc(subIfNode.Left);
+                        commandBuffer.Add("move 3 2");
+                    }else{
+                        /* the condition expression is not supportted */
+
+                        throw new SharkCodeFormatException("不支持的条件表达式");
+                    }
+                    int addrNow = commandBuffer.Count;
+                    GenForBlock(subIfNode.Right);
+                    int offset = commandBuffer.Count - addrNow;
+                    commandBuffer.Insert(addrNow,$"jmp {offset + 2}");
+                }else{
+                    /* subNode is an else node, so its left node is a block node  */
+
+                    GenForBlock(subIfNode.Left);
+                }
+            }
+            public void GenForWhile(SharkASTree loopNode){
+                /* generate il code for while node */
+
+                int addrStart = commandBuffer.Count;
+                if(loopNode.Left.NdType == NodeType.INDEX){
+                    GenForIndex(loopNode.Left);
+                    commandBuffer.Add("move 3 2");
+                }else if(loopNode.Left.NdType == NodeType.OP){
+                    GenForOperator(loopNode.Left);
+                    commandBuffer.Add("move 3 2");
+                }else if(loopNode.Left.NdType == NodeType.FUNC){
+                    GenForFunc(loopNode.Left);
+                    commandBuffer.Add("move 3 2");
+                }else if(loopNode.Left.IsVarOrLiteral){
+                    HandleVal(loopNode.Left,2);
+                }
+                int addrBodyStart = commandBuffer.Count;
+                GenForBlock(loopNode.Right);
+                commandBuffer.Insert(addrBodyStart,$"jmp {commandBuffer.Count - addrBodyStart + 2}");
+                commandBuffer.Add($"goto {addrStart}");
+            }
+            public void GenForAssign(SharkASTree T){
+                /* generate il code for assign node */
+
+                if(T.Left.IsVar){
+                    /* left node must be id type */
+
+                    if(T.Right.IsVar){
+                        commandBuffer.Add($"load_var 3 {T.LeftValue}");
+                    }else if(T.Right.IsLiteral){
+                        commandBuffer.Add($"assign {GetConstantId(T.RightValue)} {T.LeftValue}");
+                        return;
+                    }else{
+                        if(T.Right.NdType == NodeType.OP){
+                            GenForOperator(T.Right);
+                        }else if(T.Right.NdType == NodeType.FUNC){
+                            GenForFunc(T.Right);
+                        }else if(T.Right.NdType == NodeType.LIST){
+                            GenForList(T.Right,false);
+                        }else if(T.Right.NdType == NodeType.DEF){
+                            GenForDefination(T.Right);
+                        }else if(T.Right.NdType == NodeType.INDEX){
+                            GenForIndex(T.Right);
+                        }else{
+                            throw new SharkCodeFormatException("不支持的操作");
+                        }
+                    }
+                    commandBuffer.Add($"pop_var {T.LeftValue}");
+                    return;
+                }
+                throw new SharkCodeFormatException("不能给非变量对象赋值");
+            }
+            public void GenForDefination(SharkASTree T){
+                /* generate il code for function defination */
+
+                commandBuffer.Add("def");                   //def a new function
+                for(int i = 0;i < T.Right.BlockSize;i++){
+                    commandBuffer.Add($"write_args {T.Right.nodes[i].Value}");
+                }
+                List<string> globalCommands = commandBuffer;
+                commandBuffer = new List<string>();         // function commands
+
+                GenForBlock(T.nodes[2]);        //gen the ilcode for function block
+                foreach(string code in commandBuffer){
+                    globalCommands.Add($"write_code {code}");
+                }
+                globalCommands.Add("enddef");
+                commandBuffer = globalCommands;
+            }
+            public void GenForIndex(SharkASTree T){
+                /* generate il code for index node */
+
+                if(T.Left.NdType == NodeType.LIST){
+                    GenForList(T.Left,false);
+                }else if(T.Left.NdType == NodeType.FUNC){
+                    GenForFunc(T.Left);
+                }else if(T.Left.NdType == NodeType.INDEX){
+                    GenForIndex(T.Left);
+                }else if(T.Left.IsVar){
+                    HandleVal(T.Left,3);
+                }else{
+                    throw new SharkCodeFormatException("不支持的索引对象");
+                }
+
+                if(T.Right.NdType == NodeType.FUNC){
+
+                    commandBuffer.Add("push");
+                    GenForFunc(T.Right);
+                    commandBuffer.Add("pop 0");
+                }else if(T.Right.NdType == NodeType.INDEX){
+
+                    commandBuffer.Add("push");
+                    GenForIndex(T.Right);
+                    commandBuffer.Add("pop 0");
+                }else if(T.Right.NdType == NodeType.OP){
+
+                    commandBuffer.Add("push");
+                    GenForOperator(T.Right);
+                    commandBuffer.Add("pop 0");
+                }else if(T.Right.IsVarOrLiteral){
+
+                    commandBuffer.Add("move 3 0");
+                    HandleVal(T.Right,1);
+                }
+                commandBuffer.Add("index");
+            }
+            public void GenForOperator(SharkASTree T){
+                /* generate il code for op node */
+
+                if(T.Left.IsVarOrLiteralOrNone && T.Right.IsVarOrLiteralOrNone){
+
+                    HandleVal(T.Left,0);
+                    HandleVal(T.Right,1);
+                }else if(T.Left.IsVarOrLiteral){
+                    HandleOperator(T.Right);
+                    commandBuffer.Add("move 3 1");
+                    HandleVal(T.Left,0);
+                }else if(T.Right.IsVarOrLiteral){
+                    HandleOperator(T.Left);
+                    commandBuffer.Add("move 3 0");
+                    HandleVal(T.Right,0);
+                }else{
+                    /* left and right are all operation */
+
+                    for(int i = 0;i < T.nodes.Length;i++){
+                        HandleOperator(T.nodes[i]);
+                        commandBuffer.Add((i == 0)?"push":"move 3 1");
+                    }
+                    commandBuffer.Add("pop 0");
+                }
+                commandBuffer.Add(T.Value);
+            }
+            public void GenForFunc(SharkASTree T){
+                /* 为函数节点生成中间代码 */
+
+                if(T.Left.IsVar){
+                    // left is a function id;
+
+                    commandBuffer.Add($"push_func {T.LeftValue}");
+                }else if(T.Left.NdType == NodeType.FUNC){
+                    // left is a function call
+
+                    GenForFunc(T.Left);
+                    commandBuffer.Add("pusho_func");
+                }else if(T.Left.NdType == NodeType.INDEX){
+                    /* index a function from list*/
+
+                    GenForIndex(T.Left);
+                    commandBuffer.Add("pusho_func");
+                }else{
+                    /* object cannot be run */
+
+                    throw new SharkCodeFormatException("无法执行的对象");
+                }
+                GenForList(T.Right,true);
+                commandBuffer.Add("call");
+            }
+            public void GenForList(SharkASTree tree,bool isParamsList){
+                /* target node is a args node */
+
+                commandBuffer.Add("list");
+                SharkASTree subNode;
+                for(int i = 0;i < tree.BlockSize;i++){
+                    subNode = tree.nodes[i];
+                    if(subNode.IsOperator){
+                        /* 运算符类型的操作数 */
+
+                        GenForOperator(subNode);
+                        commandBuffer.Add("push_args");
+                    }else if(subNode.IsVarOrLiteral){
+
+                        HandleVal(subNode);
+                    }else if(subNode.NdType == NodeType.INDEX){
+
+                        GenForIndex(subNode);
+                        commandBuffer.Add("push_args");
+                    }else if(subNode.NdType == NodeType.FUNC){
+
+                        GenForFunc(subNode);
+                        commandBuffer.Add("push_args");
+                    }else if(subNode.NdType == NodeType.DEF){
+
+                        GenForDefination(subNode);
+                        commandBuffer.Add("push_args");
+                    }else if(subNode.NdType == NodeType.LIST){
+
+                        GenForList(subNode,false);
+                        commandBuffer.Add("pop_list");
+                        commandBuffer.Add("push_args");
+                    }else{
+                        throw new SharkCodeFormatException("不支持的列表元素");
+                    }
+                }
+                if(!isParamsList){
+                    commandBuffer.Add("pop_list");
+                }
+            }
+            
+        }
+    }
+    
     namespace SharkVirtualMachine{
-        /* the code parser would convert the source code into internal code */
+        /* used to run SharkIL code */
 
         public class SharkAPI{
-            /* the core function of shark */
-
-            public static __shark_list SHARKAPI_MakeArgs(){
-                /* create an empty list */
-
-                return new __shark_list();
-            }
-            public static void SHARKAPI_PushArgs(__shark_list args,SharkObject O){
-                /* push a parameters into target args */
-
-                args.Append(O);
-            }
-            public static SharkObject SHARKAPI_MakeList(){
-                /* create en empty list and pack it into a SharkObject */
-
-                return new SharkObject(new __shark_list());
-            }
-            public static SharkObject SHARKAPI_Str2SkStr(string cnt){
-                /* convert string type value to shark string */
-
-                return new SharkObject(new __shark_value(cnt));
-            }
-            public static string SHARKAPI_SkStr2Str(SharkObject O){
-                /* get the string type value from shark object */
-
-                if(O.type != SharkType.VALUE){
-                    throw SharkScriptTypeError.defaultErr;
+            public static SkObject Neg(SkObject obj){
+                if(obj.IsVal){
+                    SkVal val = obj.GetValue<SkVal>();
+                    if(val.IsFloat){
+                        return new SkObject(new SkVal(-val.GetFloat()));
+                    }else if(val.IsInt){
+                        return new SkObject(new SkVal(-val.GetInt()));
+                    }
                 }
-                __shark_value V = O.GetValue<__shark_value>();
-                if(V.type != SharkValueType.STRING){
-                    throw SharkScriptTypeError.defaultErr;
+                throw SharkTypeError.defaultErr;
+            }
+
+            public static SkObject Add(SkObject left,SkObject right){
+                /* add two value, and note that, only number or string type 
+                value can do this operation */
+
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsText && r.IsText){
+                        return new SkObject(new SkVal(l.GetValue<string>() + r.GetValue<string>()));
+                    }else if(l.IsInt && r.IsInt){
+                        return new SkObject(new SkVal(l.GetInt() + r.GetInt()));
+                    }else if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() + r.GetFloat()));
+                    }
                 }
-                return V.GetValue<string>();
+                throw SharkTypeError.defaultErr;
             }
-            public static SharkObject SHARKAPI_Float2SkFloat(float value){
-                /* convert float type value to shark float */
+            public static SkObject Sub(SkObject left,SkObject right){
+                /* compute left - right */
 
-                return new SharkObject(new __shark_value(value));
-            }
-            public static float SHARKAPI_SkFloat2Float(SharkObject O){
-                /* get the float type value from shark object */
-
-                if(O.type != SharkType.VALUE){
-                    throw SharkScriptTypeError.defaultErr;
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsInt && r.IsInt){
+                        return new SkObject(new SkVal(l.GetInt() - r.GetInt()));
+                    }else if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() - r.GetFloat()));
+                    }
                 }
-                __shark_value V = O.GetValue<__shark_value>();
-                if(V.type != SharkValueType.FLOAT){
-                    throw SharkScriptTypeError.defaultErr;
-                }
-                return V.GetValue<float>();
+                throw SharkTypeError.defaultErr;
             }
-            public static SharkObject SHARKAPI_Int2SkInt(int value){
-                /* convert float type value to shark float */
-
-                return new SharkObject(new __shark_value(value));
-            }
-            public static int SHARKAPI_SkInt2Int(SharkObject O){
-                /* get the int type value from shark object */
-
-                if(O.type != SharkType.VALUE){
-                    throw SharkScriptTypeError.defaultErr;
-                }
-                __shark_value V = O.GetValue<__shark_value>();
-                if(V.type != SharkValueType.INT){
-                    throw SharkScriptTypeError.defaultErr;
-                }
-                return V.GetValue<int>();
-            }
-            public static SharkObject SHARKAPI_Obj2SkObj(object data){
-                /* convert object type value to shark object */
-
-                return new SharkObject(new __shark_value(data));
-            }
-            public static object SHARKAPI_SkObj2Obj(SharkObject O){
-                if(O.type != SharkType.OBJ){
-                    throw SharkScriptTypeError.defaultErr;
-                }
-                return O.GetValue<object>();
-            }
-            public static T SHARKAPI_SkObj2Obj<T>(SharkObject O){
-                if(O.type != SharkType.OBJ){
-                    throw SharkScriptTypeError.defaultErr;
-                }
-                return (T)O.GetValue<object>();
-            }
-
-        }
-
-        public class SharkAPICollection{
-            /*  this object will maintain a dictionary, it would bind cs function from the top level 
-            to shark_function and expose them to shark script, this collection can be sured by pragma
-            when FIND_FUNC operation command has been run, then the interpreter would search target 
-            function in all SharkAPICollection loaded in interpreter, if no function has been found, 
-            then NameError will be thrown */
-
-            private Dictionary<string,__shark_function> apis;
-            public SharkAPICollection(){
-                apis = new Dictionary<string, __shark_function>();
-            }
-            public bool AddFunction(string name,__shark_function func){
-                /* add a new shark function to here, if there is a function with same name
-                then if will failed */
-
-                if(apis.ContainsKey(name)){
-                    return false;
-                }
-                apis.Add(name,func);
-                return true;
-            }
-            public __shark_function Search(string name){
-                /* try to get a function, if failed, then return null */
-
-                __shark_function buf;
-                if(apis.TryGetValue(name,out buf)){
-                    return buf;
-                }
-                return null;
-            }
-        }
-
-        public class SharkAssembly{
-            /* this function will maintain a dictionary, and each element will save a SharkAPICollection 
-            it will be initialized as a component of SharkInterpreter, and it can load a new SharkAPICollection 
-            or remove it */
-
-            private Dictionary<string,SharkAPICollection> __scope;
-            public SharkAssembly(){
-                /* intialize the __scope */
-
-                __scope = new Dictionary<string, SharkAPICollection>();
-                SharkAPICollection Global = new SharkAPICollection();
-                __scope.Add("Global",Global);
-            }
-            public SharkAPICollection GetGlobalCollection(){
-                //return __scope.GetValueOrDefault("Global");
-
-                return GetCollection("Global");
-            }
-            public SharkAPICollection GetCollection(string apiName){
-                /*找到指定的API集合*/
-
-                SharkAPICollection apis;
-                if(__scope.TryGetValue(apiName,out apis)){
-                    return apis;
-                }
-                return null;
-            }
-            public void AddGlobalFunction(string name,__shark_function func){
-
-                SharkAPICollection global = GetGlobalCollection();
-                global.AddFunction(name,func);
-            }
-            public void LoadAPICollection(string apiName,SharkAPICollection collection){
-
-                __scope.Add(apiName,collection);
-            }
-            public bool Contains(string collectionName){
+            public static SkObject Mul(SkObject left,SkObject right){
+                /* return left * right */
                 
-                return __scope.ContainsKey(collectionName);
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsInt && r.IsInt){
+                        return new SkObject(new SkVal(l.GetInt() * r.GetInt()));
+                    }else if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() * r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
             }
-            public __shark_function SearchFunction(string functionName){
-                /* iterate all collection and search target function */
+            public static SkObject Div(SkObject left,SkObject right){
+                /* return left / right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsInt && r.IsInt){
+                        return new SkObject(new SkVal(l.GetInt() / r.GetInt()));
+                    }else if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() / r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Mod(SkObject left,SkObject right){
+                /* return left % right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsInt && r.IsInt){
+                        return new SkObject(new SkVal(l.GetInt() % r.GetInt()));
+                    }else if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() % r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Pow(SkObject left,SkObject right){
+                /* return left % right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(MathF.Pow(l.GetFloat(),r.GetFloat())));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Gt(SkObject left,SkObject right){
+                /* return left > right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() > r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Lt(SkObject left,SkObject right){
+                /* return left < right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() < r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Ge(SkObject left,SkObject right){
+                /* return left >= right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() >= r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Le(SkObject left,SkObject right){
+                /* return left <= right */
+                
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsNumber && r.IsNumber){
+                        return new SkObject(new SkVal(l.GetFloat() <= r.GetFloat()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject And(SkObject left,SkObject right){
 
-                foreach(string name in __scope.Keys){
-                    __shark_function func = GetCollection(name).Search(functionName);
-                    if(func != null){
-                        return func;
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsBoolean && r.IsBoolean){
+                        return new SkObject(new SkVal(l.GetBool() && r.GetBool()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Or(SkObject left,SkObject right){
+
+                if(left.IsVal && right.IsVal){
+                    SkVal l = left.GetValue<SkVal>();
+                    SkVal r = right.GetValue<SkVal>();
+                    if(l.IsBoolean && r.IsBoolean){
+                        return new SkObject(new SkVal(l.GetBool() || r.GetBool()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+            public static SkObject Not(SkObject obj){
+                if(obj.IsVal){
+                    SkVal val = obj.GetValue<SkVal>();
+                    if(val.IsBoolean){
+                        return new SkObject(new SkVal(!val.GetBool()));
+                    }
+                }
+                throw SharkTypeError.defaultErr;
+            }
+        }
+
+
+        public class SharkField{
+            /* maintain a dictionary and save SkObject according to string */
+
+            private Dictionary<string,SkObject> field;
+            public SharkField(){
+
+                field = new Dictionary<string, SkObject>();
+            }
+            public bool Contains(string name){
+
+                return field.ContainsKey(name);
+            }
+            public void Declear(string ID){
+                /* create an empty value 
+                if target ID has been used, then this function won't work */
+
+                if(!field.ContainsKey(ID)){
+                    field.Add(ID,new SkObject());
+                }
+            }
+            public void Rewrite(string ID,SkObject Obj){
+                /* rewrite target ID with given value */
+
+                if(!field.ContainsKey(ID)){
+                    field.Add(ID,Obj);
+                }
+                field[ID] = Obj;
+            }
+            public SkObject Get(string ID){
+                /* get value with given ID */
+
+                if(!field.ContainsKey(ID)){
+                    throw SharkNameError.defaultErr;
+                }
+                return field[ID];
+            }
+            public void Clear(){
+                /* remove all values */
+
+                field.Clear();
+            }
+            public SharkField Clone(){
+
+                SharkField _ = new SharkField();
+                foreach(string name in field.Keys){
+                    _.field.Add(name,field[name]);
+                }
+                return _;
+            }
+        }
+
+        public class SharkRegister{
+            /* object can save single object data */
+
+            private SkObject data;
+            /* data saved in register */
+
+            public SkObject Data{
+                get{return data;}
+                set{data = value;}
+            }
+
+            public SharkRegister(){
+                /* initialize data */
+
+                data = new SkObject();
+            }
+            public T FetchData<T>(){
+
+                return data.GetValue<T>();
+            }
+        }
+
+        public class SharkScript:IJumper{
+            /* shark script represent one sk file including commands 
+            and global field and function list */
+
+            public static CodeScanner scanner = new CodeScanner();
+            public static CodeParser parser = new CodeParser();
+            public static SharkILGenerator generator = new SharkILGenerator();
+
+            public static SharkScript ReadScript(string filepath){
+                /* read source code and create a new shark script object for this */
+
+                string sourceCode = SharkUtil.ReadSource(filepath);
+                scanner.LoadSource(sourceCode);
+                parser.LoadTokens(scanner.Scan());
+                Tuple<List<SharkCommand>,List<SharkCommand>> O = generator.GenForScript(parser.GenAST());
+                SharkScript _ = new SharkScript(O.Item2,O.Item1);
+                return _;
+            }
+
+            private SharkField globalField;
+            /* the global scope */
+
+            private List<SkObject> constantList;
+            /* save all constant */
+
+            private List<SharkField> localField;
+            /* the field of target function, when 
+            target function is a Shark Function, then this field would 
+            be added */
+
+            public int Addr{get;set;}
+            private Stack<IJumper> LastObjs;
+            private IJumper now;
+            private SkFunc definationBuf;
+            private List<SharkCommand> constants;
+            private List<SharkCommand> codes;
+
+            public void ShowCommands(){
+
+                for(int i = 0;i < codes.Count;i++){
+                    Console.WriteLine($"{i}:{codes[i]}");
+                }
+            }
+
+            public SharkScript(List<SharkCommand> constants,List<SharkCommand> codes){
+
+                globalField = new SharkField();
+                constantList = new List<SkObject>();
+                localField = new List<SharkField>();
+                LastObjs = new Stack<IJumper>();
+                now = this;
+
+                this.constants = constants;
+                this.codes = codes;
+            }
+            public void RunScript(SharkInterpreter interpreter){
+
+                interpreter.LoadScript(this);
+                foreach(SharkCommand cmd in constants){
+                    interpreter.RunSingle(cmd);
+                }
+                while(IsRunning){
+                    interpreter.RunSingle(this.codes[Addr]);
+                    Addr ++;
+                }
+            }
+            public bool IsRunning{
+                get{return Addr < this.codes.Count;}
+            }
+            public bool IsCallFunction{
+                get{return now != this;}
+            }
+            public void CallFunction(SkFunc func,SkList args,SharkInterpreter interpreter){
+                /* 执行一个Shark风格的函数 */
+
+                localField.Add(func.scope);
+                if(now != this){
+                    LastObjs.Push(now);
+                }
+                now = func;
+                func.Call(interpreter,args);
+            }
+            public void ReturnLast(){
+                /* 回到上一个调用的函数 */
+
+                ((SkFunc)now).ShutDown();       //停止当前正在执行的函数
+                localField.RemoveAt(localField.Count - 1);      //移除最后一个单位
+                if(LastObjs.Count > 0){
+                    now = LastObjs.Pop();
+                }else{
+                    now = this;
+                }
+            }
+            public void opJump(int offset){
+
+                now.Jmp(offset);
+            }
+            public void opGoto(int addr){
+
+                now.Goto(addr);
+            }
+            public void opDefination(){
+                /* 构建一个新的函数原型 */
+
+                definationBuf = new SkFunc();
+            }
+            public void opAddParams(string argName){
+                /* 增加函数的参数 */
+
+                definationBuf.paramsList.Add(argName);
+            }
+            public SkObject GetFunctionBuf(){
+                /* 取得当前正在定义的函数对象 */
+
+                return new SkObject(definationBuf);
+            }
+            public void opWriteCode(opParams args){
+                /* 向当前在定义的函数对象中写入指令 */
+
+                SharkCommand cmd = args.ReleaseNextCommand();       //write_code pop_var 0,0,x
+                if(IsCallFunction){
+                    /* if is calling a function now, then we should record the variable 
+                    defined in this function */
+
+                    OpCode opCode = (OpCode)cmd.opCode;
+                    if(opCode == OpCode.assign || opCode == OpCode.pop_var){
+                            /* these code can make new variable */
+
+                        definationBuf.scope.Declear(cmd.opArgs.variableId);
+                    }else if(opCode == OpCode.load_var || opCode == OpCode.push_var || opCode == OpCode.push_func){
+                        /* these code would visit target function */
+
+                        if(!definationBuf.CanSearchName(cmd.opArgs.variableId)){
+                            /* 函数内部搜索不到的值 */
+
+                            SkObject Obj = SearchVariableInUpLvl(cmd.opArgs.variableId);
+                            /* 尝试在上级函数的域中搜索(忽略全局域)*/
+
+                            if(Obj != null){
+                                /* 上级函数的域中确实可以搜索到目标变量,则该变量应该复制到该函数的域中 */
+
+                                definationBuf.scope.Rewrite(cmd.opArgs.variableId,Obj);
+                            }
+                            //否则则默认可以在全局域中搜索到..
+                        }
+                    }
+                }
+                definationBuf.WriteOperations(cmd);
+            }
+            public bool IsFunction(){
+
+                return false;
+            }
+            public void AddConstant(SkObject value){
+
+                constantList.Add(value);
+            }
+            public void PushLocalField(SharkField field){
+                /* add function field to this list */
+
+                localField.Add(field);
+            }
+            public SkObject GetConstant(int constId){
+                /* get constant in target position */
+
+                return constantList[constId].CloneConstant();
+            }
+            public void SetVariable(string name,SkObject data){
+                /* rewrite the data of target name */
+
+                if(localField.Count > 0){
+                    localField[localField.Count - 1].Rewrite(name,data);
+                }else{
+                    globalField.Rewrite(name,data);
+                }
+            }
+            public SkObject SearchVariableInUpLvl(string name){
+
+                if(localField.Count > 0){
+                    for(int i = localField.Count - 1;i >= 0;i --){
+                        if(localField[i].Contains(name)){
+                            return localField[i].Get(name);
+                        }
                     }
                 }
                 return null;
             }
-            public void Clear(){
+            public SkObject SearchVariable(string name){
+                /* get target variable */
 
-                __scope.Clear();
+
+                //Console.WriteLine($"正在搜索变量名:{name},此时域的数量为:{localField.Count}");
+                if(localField.Count > 0){
+                    for(int i = localField.Count - 1;i >= 0;i--){
+                        if(localField[i].Contains(name)){
+                            return localField[i].Get(name);
+                        }
+                    }
+                }
+                if(globalField.Contains(name)){
+                    return globalField.Get(name);
+                }
+                throw SharkNameError.defaultErr;
             }
-        }
-
-        public class SharkScope{
-            /* contained a dictionary used to save shark datas */
-
-            Dictionary<string,SharkObject> __scope;
-
-            public SharkScope(){
-
-                __scope = new Dictionary<string, SharkObject>();
+            public void Jmp(int offset){
+                Addr += offset;
             }
-            public SharkObject FindObject(string key){
-                /*find target object according to a string key*/
-                
-                SharkObject buf;
-                if(__scope.TryGetValue(key,out buf)){
-                    return buf;
-                };
-                return null;
-            }
-            public void Remove(string key){
-                /* remove target variable */
-
-                __scope.Remove(key);
-            }
-            public void Save(string key,SharkObject value){
-
-                __scope.Add(key,value);
-            }
-            public void Save(Tuple<string,SharkObject> tuple){
-
-                __scope.Add(tuple.key,tuple.value);
-            }
-            public bool ContainsKey(string varName){
-                /* check out if target name has been used */
-
-                return __scope.ContainsKey(varName);
-            }
-            public void Clear(){
-                /* clear all datas */
-
-                __scope.Clear();
+            public void Goto(int addr){
+                Addr = addr;
             }
         }
 
         public class SharkInterpreter{
-            /* SharkInterpreter is a virtual machine used to run the IL code */
+            /* shark virtual machine 
+            contained four register */
 
-            public delegate SharkAPICollection GetSharkAPICollectionWithName(string name);
+            public delegate void Operation(opParams arsg);
 
-            private Stack<__shark_list> paramStack;
-            private Stack<__shark_function> functionStack;
-            private SharkAssembly assembly;
-            private SharkScope field;
-            private __shark_function functionDefination;
-            private string functionName;
-            private IL il;
-            private SharkScriptLexer lexer;
+            public static Operation[] ops;
 
-            private string bindName;
-            private bool isBinded;
-            private GetSharkAPICollectionWithName findAPI;
+            public const byte REG_0      = 0;
+            public const byte REG_1      = 1;
+            public const byte REG_COND   = 2;
+            public const byte REG_RESULT = 3;
+
+            private SharkRegister[] Registers;
+            /* Register contained four register the first and second 
+            is compute register and the third is condition register, 
+            the fourth is result condition */
+
+            private Stack<SkObject> operationStk;
+            /* a new skobject will be push into this stack only 
+            if left and right node are all operator */
+
+            private Stack<ICallable> funcStk;
+            /* when one function has been called, then it will be saved in 
+            this stack, and if target function is not found in baseField, then
+            a name error will be thrown */
+
+            private Stack<SkList> paramsStk;
+            /* when call a function or create a new list, Shark would add 
+            a new empty list to this stack */
+
+            private SharkScript script;
 
             public SharkInterpreter(){
-                /* initialize the shark_interpreter */
+                /* initialize base components */
 
-                paramStack = new Stack<__shark_list>();
-                functionStack = new Stack<__shark_function>();
-                assembly = new SharkAssembly();
-                field = new SharkScope();
-                lexer = new SharkScriptLexer();
-                InitializeIL();
-            }
-            public void Run(string[] script){
-                /* 从文件中刚读取的完整的脚本 */
-
-                script = SharkScriptUtil.RemoveComment(SharkScriptUtil.HandleSharkScript(script));
-                RunILCode(lexer.GenerateILCode(script,false));
-            }
-            public void Erase(){
-                /* clear all the datas */
-
-                field.Clear();
-            }
-            public void RunILCode(Queue<string> lines){
-                /* run the il code from il list */
-
-                int size = lines.Count;
-                for(int i = 0;i < size;i ++){
-                    string line = lines.Dequeue();
-                    il.RunILCode(line);
+                Registers = new SharkRegister[4];
+                for(int i = 0; i < Registers.Length; i++){
+                    Registers[i] = new SharkRegister();
                 }
+                funcStk = new Stack<ICallable>();
+                paramsStk = new Stack<SkList>();
+                operationStk = new Stack<SkObject>();
+                InitializeOps();
             }
-            public void SetAPIFinder(GetSharkAPICollectionWithName getter){
-                /* 设置新的API搜寻器 */
 
-                findAPI = getter;
+            public void InitializeOps(){
+                /* 初始化虚拟机指令集 */
+
+                ops = new Operation[]{
+                    /* list */
+
+                    Move,
+                    LoadConst,
+                    LoadVar,
+                    Push,
+                    PushVar,
+                    PushConst,
+                    PushFunction,
+                    PushOFunction,
+                    PopOp,
+                    PopList,
+                    Pop,
+                    PopVar,
+                    Index,
+                    MakeList,
+                    Call,
+                    Goto,
+                    Jmp,
+                    Assign,
+                    Def,
+                    EndDef,
+                    AddParam,
+                    AddCode,
+                    Ret,
+                    Constant,
+                    LoadNull,
+                    PushNull,
+                    opNeg,
+                    opAdd,
+                    opSub,
+                    opMul,
+                    opDiv,
+                    opPow,
+                    opMod,
+                    opGt,
+                    opLt,
+                    opGe,
+                    opLe,
+                    opEq,
+                    opNe,
+                    opAnd,
+                    opOr,
+                    opNot
+                };
             }
-            private void InitializeIL(){
-                /* load all the IL code of current interpreter */
+            public void RunSingle(SharkCommand cmd){
+                /* run single command */
 
-                il = new IL();
-
-                /* load all functions with no args */
-                IL.OP_NOARGS buf0;
-                buf0 = OP_MAKE_ARGSLIST;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"MAKE_LIST",(Delegate)buf0.Clone());
-                buf0 = OP_DOCALL;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"DOCALL",(Delegate)buf0.Clone());
-                buf0 = OP_DOCALL_FILL_PARAM;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"DOCALL_FILL_PARAM",(Delegate)buf0.Clone());
-                buf0 = OP_END_DEFINE_FUNC;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"END_DEFINE_FUNC",(Delegate)buf0.Clone());
-                buf0 = OP_END_DEFINE_FUNC_INLIST;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"END_DEFINE_FUNC_INLIST",(Delegate)buf0.Clone());
-                buf0 = OP_FILL_PARAM;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"FILL_PARAM",(Delegate)buf0.Clone());
-                buf0 = OP_ERASE;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"CLR",(Delegate)buf0.Clone());
-                buf0 = OP_DEFINE_FUNC_NULLNAME;
-                il.AddFunction(IL.OP_TYPE._SIGN_NOARGS,"DEFINE_FUNC_NULLNAME",(Delegate)buf0.Clone());
-
-
-                /* load all functions with one args */
-                IL.OP_ONEARGS buf1;
-                buf1 = OP_FIND_FUNC;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"FIND_FUNC",(Delegate)buf1.Clone());
-                buf1 = OP_PUSH_STRING;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"PUSH_STRING",(Delegate)buf1.Clone());
-                buf1 = OP_PUSH_INT;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"PUSH_INT",(Delegate)buf1.Clone());
-                buf1 = OP_PUSH_FLOAT;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"PUSH_FLOAT",(Delegate)buf1.Clone());
-                buf1 = OP_PUSH_VAR;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"PUSH_VAR",(Delegate)buf1.Clone());
-                buf1 = OP_DOCALL_FILL;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"DOCALL_FILL",(Delegate)buf1.Clone());
-                buf1 = OP_DIM;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"DIM",(Delegate)buf1.Clone());
-                buf1 = OP_DEFINE_FUNC;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"DEFINE_FUNC",(Delegate)buf1.Clone());
-                buf1 = OP_ADDILCODE;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"ADDILCODE",(Delegate)buf1.Clone());
-                buf1 = OP_ADDILCODE_PUSHVAR;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"ADDILCODE_PUSHVAR",(Delegate)buf1.Clone());
-                buf1 = OP_END_DEFINE_FUNC_FILLVAR;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"END_DEFINE_FUNC_FILLVAR",(Delegate)buf1.Clone());
-                buf1 = OP_FILL_LIST;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"FILL_LIST",(Delegate)buf1.Clone());
-                buf1 = OP_LOADAPI;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"LOAD_API",(Delegate)buf1.Clone());
-                buf1 = OP_BIND;
-                il.AddFunction(IL.OP_TYPE._SIGN_ONEARGS,"BIND",(Delegate)buf1.Clone());
-
-                IL.OP_TWOARGS buf2;
-                buf2 = OP_FILL_STRING;
-                il.AddFunction(IL.OP_TYPE._SIGN_TWOARGS,"FILL_STRING",(Delegate)buf2.Clone());
-                buf2 = OP_FILL_FLOAT;
-                il.AddFunction(IL.OP_TYPE._SIGN_TWOARGS,"FILL_FLOAT",(Delegate)buf2.Clone());
-                buf2 = OP_FILL_INT;
-                il.AddFunction(IL.OP_TYPE._SIGN_TWOARGS,"FILL_INT",(Delegate)buf2.Clone());
-                buf2 = OP_FILL_VAR;
-                il.AddFunction(IL.OP_TYPE._SIGN_TWOARGS,"FILL_VAR",(Delegate)buf2.Clone());
+                Console.WriteLine(cmd);
+                ops[cmd.opCode](cmd.opArgs);
             }
-            public SharkAPICollection GetCurrentAPICollection(){
-                /* 找到当前的API集合，用于存放在当前脚本中存放的所有的函数 */
 
-                if(isBinded){
-                    return assembly.GetCollection(bindName);
-                }
-                return assembly.GetGlobalCollection();
-            }
-            public void LoadAPI(string name,SharkAPICollection collection){
-                /* load a new collection */
+            public void LoadScript(SharkScript script){
+                /* change the current script */
 
-                assembly.LoadAPICollection(name,collection);
+                this.script = script;
             }
-            public void OP_LOADAPI(string apiName){
-                /* 在assembly中加载新的作用域 */
+            public SharkRegister GetRegister(int idx){
 
-                if(!assembly.Contains(apiName)){
-                    assembly.LoadAPICollection(apiName,findAPI(apiName));
-                }
+                return Registers[idx];
             }
-            public void OP_BIND(string bindName){
-                /* 将当前的函数声明绑定到指定的绑定名当中,如果绑定名错误，则指定绑定名错误 */
+            public void Move(opParams args){
+                /* move the value in register position to constId */
 
-                if(assembly.Contains(bindName)){
-                    throw new SharkBaseException("绑定名已经被使用");
-                }
-                SharkAPICollection apis = new SharkAPICollection();
-                assembly.LoadAPICollection(bindName,apis);
-                this.bindName = bindName;
-                isBinded = true;
+                Registers[args.constId].Data = Registers[args.position].Data;
             }
-            public void OP_ERASE(){
-                /* 清空栈区和作用域 */
-                
-                Erase();
-            }
-            public void OP_DEFINE_FUNC(string functionName){
-                /* define a new function */
+            public void LoadConst(opParams args){
+                /* load a constant value into target register */
 
-                functionDefination = new __shark_function();
-                this.functionName = functionName;
+                Registers[args.position].Data = script.GetConstant(args.constId);
             }
-            public void OP_DEFINE_FUNC_NULLNAME(){
-                /*定义一个匿名函数，该函数只能赋值给一个变量或者填入列表 */
+            public void LoadVar(opParams args){
+                /* load target variable into target register */
 
-                functionDefination = new __shark_function();
-                this.functionName = null;
+                Registers[args.position].Data = script.SearchVariable(args.variableId);
             }
-            public void OP_ADDILCODE(string line){
+            public void Push(opParams args){
+                /* push value in result register into current param stack */
 
-                functionDefination.AddILCode(line);
+                paramsStk.Peek().Add(Registers[REG_RESULT].Data);
             }
-            public void OP_ADDILCODE_PUSHVAR(string line){
-                /* 定义一个函数时的特殊命令，如果命令中包含PUSHVAR命令，那么
-                被push的变量必须要复制到目标函数自己的作用域中 */
+            public void PushVar(opParams args){
+                /* push variable into param stack */
 
-                string varName = IL.GetPushVarName(line);
-                if(field.ContainsKey(varName)){
-                    if(!functionDefination.HasFunctionField()){
-                        functionDefination.InitializeField();
-                    }
-                    functionDefination.AddVariable(varName,field.FindObject(varName));
-                    return;
-                }
-                functionDefination.AddILCode(line);
+                paramsStk.Peek().Add(script.SearchVariable(args.variableId));
             }
-            public void OP_END_DEFINE_FUNC(){
-                /* 结束函数的定义，目标函数将保存在全局assembly中 */
+            public void PushConst(opParams args){
+                /* push constant value into param stack */
 
-                GetCurrentAPICollection().AddFunction(this.functionName,functionDefination.Clone());
-                functionDefination = null;
+                paramsStk.Peek().Add(script.GetConstant(args.constId));
             }
-            public void OP_END_DEFINE_FUNC_INLIST(){
-                /* 匿名函数对象将作为一个对象传递给目标列表,目标列表有可能是
-                参数列表或者普通列表 */
+            public void PushFunction(opParams args){
+                /* push function into param stack 
+                if function saved in same way like */
 
-                SharkObject func = new SharkObject(functionDefination.Clone());
-                paramStack.Peek().Append(func);
-                functionDefination = null;
-            }
-            public void OP_END_DEFINE_FUNC_FILLVAR(string varName){
-                /* 匿名函数对象将作为一个对象保存在目标变量中 */
-
-                SharkObject func = new SharkObject(functionDefination.Clone());
-                field.FindObject(varName).Rewrite(func);
-                functionDefination = null;
-            }
-            public void OP_FIND_FUNC(string functionName){
-                /* FIND_FUNC is a IL operation, when you call it, it will search 
-                the function in global api group and other api group */
-
-                __shark_function func = assembly.SearchFunction(functionName);
-                if(func == null){
-                    throw SharkScriptNameError.defaultErr;
-                }
-                functionStack.Push(func);
-            }
-            public void OP_MAKE_ARGSLIST(){
-                /* MAKE_ARGSLIST is a IL opreation, it will make a new args list 
-                and saved into paramStack */
-
-                __shark_list list = new __shark_list();
-                paramStack.Push(list);
-            }
-            public void OP_PUSH_STRING(string strValue){
-                /* push a string value into target paramlist */
-
-                paramStack.Peek().Append(SharkAPI.SHARKAPI_Str2SkStr(strValue));
-            }
-            public void OP_PUSH_FLOAT(string floatValue){
-                /* push a float value into target paramlist */
-
-                float _ = float.Parse(floatValue);
-                paramStack.Peek().Append(SharkAPI.SHARKAPI_Float2SkFloat(_));
-            }
-            public void OP_PUSH_INT(string intValue){
-                /* push a int value into target paramList */
-
-                int _ = int.Parse(intValue);
-                paramStack.Peek().Append(SharkAPI.SHARKAPI_Int2SkInt(_));
-            }
-            public void OP_DOCALL(){
-                /* take a function and target list from stack and call it */
-
-                __shark_function func = functionStack.Peek();
-                __shark_list parameters = paramStack.Pop();
-                if(func.type == __shark_function.FuncType.CS){
-                    func.Call(parameters);
+                ICallable callable = script.SearchVariable(args.variableId).GetValue<ICallable>();
+                if(callable.IsSharkFunction()){
+                    funcStk.Push(((SkFunc)callable).Clone());
                 }else{
-                    func.Call(il);
+                    funcStk.Push(callable);
                 }
-                functionStack.Pop();
             }
-            public void OP_DOCALL_FILL_PARAM(){
-                /* call target function and push the result into paramList */
+            public void PushOFunction(opParams args){
+                /* push function in result register into function stack */
 
-                __shark_function func = functionStack.Peek();
-                __shark_list parameters = paramStack.Pop();
-                if(func.type == __shark_function.FuncType.CS){
-                    paramStack.Peek().Append(func.Call(parameters));
+                ICallable callable = Registers[REG_RESULT].Data.GetValue<ICallable>();
+                if(callable.IsSharkFunction()){
+                    funcStk.Push(((SkFunc)callable).Clone());
                 }else{
-                    paramStack.Peek().Append(func.Call(il));
-                }
-                functionStack.Pop();
-            }
-            public void OP_DIM(string varName){
-                /* declear a new variable */
-
-                if(!field.ContainsKey(varName)){
-                    SharkObject O = SharkObject.None;
-                    field.Save(varName,O);   
+                    funcStk.Push(callable);
                 }
             }
-            public void OP_DOCALL_FILL(string varName){
-                /* fill the result of target function into target variable */
+            public void PopOp(opParams args){
+                /* push function in result into operation stack */
 
-                __shark_function func = functionStack.Peek();
-                __shark_list parameters = paramStack.Pop();
-                if(func.type == __shark_function.FuncType.CS){
-                    field.FindObject(varName).Rewrite(func.Call(parameters));
+                operationStk.Push(Registers[REG_RESULT].Data);
+            }
+            public void PopList(opParams args){
+                /* pop a list from paramStack and save into result */
+
+                Registers[REG_RESULT].Data = new SkObject(paramsStk.Pop());
+            }
+            public void Pop(opParams args){
+                /* pop value from operation stack into register */
+
+                Registers[args.position].Data = operationStk.Pop();
+            }
+            public void PopVar(opParams args){
+                /* save the data in result register into target variable */
+
+                script.SetVariable(args.variableId,Registers[REG_RESULT].Data);
+            }
+            public void Index(opParams args){
+                /* index data */
+
+                Registers[REG_RESULT].Data = Registers[REG_0].Data.GetValue<SkList>().Index(Registers[REG_1].Data.GetValue<SkVal>().GetInt());
+            }
+            public void MakeList(opParams args){
+                /* make an empty list */
+
+                paramsStk.Push(new SkList());
+            }
+            public void Call(opParams args){
+                /* call function */
+
+                ICallable callable = funcStk.Pop();
+                SkList paramsList = paramsStk.Pop();
+                if(callable.IsSharkFunction()){
+                    /* call like a script */
+
+                    script.CallFunction((SkFunc)callable,paramsList,this);
                 }else{
-                    field.FindObject(varName).Rewrite(func.Call(il));
-                }
-                functionStack.Pop();
-            }
-            public void OP_PUSH_VAR(string varName){
-                /* push a variable of field into current paramList 
-                如果在一个函数定义的时候遇到了该指令的话，将该变量复制到
-                函数自己的域当中，当执行函数的时候，先在函数的本地域当中搜索
-                目标变量，如果搜索失败，则在全局域中搜索。如果均搜索不到，则引发NameError */
-
-                SharkObject O;
-                if(!field.ContainsKey(varName)){
-                    int funcLvl = functionStack.Count;
-                    __shark_function F;
-                    Stack<__shark_function> tmpStk = new Stack<__shark_function>();
-                    while(funcLvl > 0){
-                        F = functionStack.Peek();
-                        if(F.HasFunctionField() && F.ContainsVariable(varName)){
-                            O = F.FindObject(varName);
-                            paramStack.Peek().Append(O);
-                            PushFunctions(tmpStk);
-                            return;
-                        }else{
-                            tmpStk.Push(functionStack.Pop());
-                            funcLvl -= 1;
-                        }
-                    }
-                    throw SharkScriptNameError.defaultErr;
-                }
-                O = field.FindObject(varName);
-                paramStack.Peek().Append(O);
-            }
-            public void OP_FILL_PARAM(){
-                /* pop a value from stack and save into the parameters 
-                note that: this function only used for type __shark_list */
-
-                __shark_list __params = paramStack.Pop();
-                paramStack.Peek().Append(new SharkObject(__params));
-            }
-            public void OP_FILL_LIST(string varName){
-                /* pop a value from stack and save into target variable */
-
-                SharkObject O = new SharkObject(paramStack.Pop());
-                field.FindObject(varName).Rewrite(O);
-            }
-            public void OP_FILL_STRING(string varName,string content){
-                /* 将一个字符串覆写到变量中 */
-
-                field.FindObject(varName).Rewrite(SharkAPI.SHARKAPI_Str2SkStr(content));
-            }
-            public void OP_FILL_FLOAT(string varName,string fValue){
-                /* 将一个浮点类型值覆写到变量中 */
-
-                float _ = float.Parse(fValue);
-                field.FindObject(varName).Rewrite(SharkAPI.SHARKAPI_Float2SkFloat(_));
-            }
-            public void OP_FILL_INT(string varName,string intValue){
-
-                int _ = int.Parse(intValue);
-                field.FindObject(varName).Rewrite(SharkAPI.SHARKAPI_Int2SkInt(_));
-            }
-            public void OP_FILL_VAR(string dest,string src){
-
-                field.FindObject(dest).Rewrite(field.FindObject(src));
-            }
-            public bool IsCallFunctionNow(){
-                /* check if is calling a function now */
-
-                return functionStack.Count > 0;
-            }
-            public void PushFunctions(Stack<__shark_function> funcs){
-                /* 将取出来的函数再压栈 */
-
-                while(funcs.Count > 0){
-                    functionStack.Push(funcs.Pop());
+                    Registers[REG_RESULT].Data = callable.Call(paramsList);
                 }
             }
+            public void Jmp(opParams args){
 
-        }
-
-        public class IL{
-            /* Shark Internal Code */
-
-            public enum OP_TYPE{
-                _SIGN_NOARGS,
-                _SIGN_ONEARGS,
-                _SIGN_TWOARGS
-            }
-            public const char ILCODE_SEP = ' ';
-
-            public delegate void OP_NOARGS();
-            public delegate void OP_ONEARGS(string parameter);
-            public delegate void OP_TWOARGS(string parameter1,string parameter2);
-
-            public Dictionary<string,OP_NOARGS> API_NOARGS;
-            public Dictionary<string,OP_ONEARGS> API_ONEARGS;
-            public Dictionary<string,OP_TWOARGS> API_TWOARGS;
-
-            public IL(){
-                /* initialize all the operation of SharkInterpreter */
-
-                API_NOARGS = new Dictionary<string, OP_NOARGS>();
-                API_ONEARGS = new Dictionary<string, OP_ONEARGS>();
-                API_TWOARGS = new Dictionary<string, OP_TWOARGS>();
-            }
-            public void AddFunction(OP_TYPE type,string name,Delegate func){
-
-                switch(type){
-                    case OP_TYPE._SIGN_NOARGS:
-                    API_NOARGS.Add(name,(OP_NOARGS)func);
-                    break;
-                    case OP_TYPE._SIGN_ONEARGS:
-                    API_ONEARGS.Add(name,(OP_ONEARGS)func);
-                    break;
-                    case OP_TYPE._SIGN_TWOARGS:
-                    API_TWOARGS.Add(name,(OP_TWOARGS)func);
-                    break;
+                if(!Registers[REG_COND].Data.GetValue<SkVal>().GetBool()){
+                    script.opJump(args.constId);
                 }
             }
-            public void RunILCode(string line){
-                /* run a piece of IL code */
+            public void Goto(opParams args){
+                /* args */
 
-                OP_TYPE type = (OP_TYPE)int.Parse(line.Substring(0,1));
-                string code = line.Substring(1,line.Length - 1);
-                switch(type){
-                    case OP_TYPE._SIGN_NOARGS:
-                    RunILCodeNoArgs(code);
-                    break;
-                    case OP_TYPE._SIGN_ONEARGS:
-                    RunILCodeOneArgs(code);
-                    break;
-                    case OP_TYPE._SIGN_TWOARGS:
-                    RunILCodeTwoArgs(code);
-                    break;
-                }
+                script.opGoto(args.constId);
             }
-            private void RunILCodeNoArgs(string code){
-                /* the code has no args, just run it */
+            public void Assign(opParams args){
+                /* assign target variable with a constant value */
 
-                SharkScriptUtil.ExtractObjectFromDict<OP_NOARGS>(code,API_NOARGS)();
+                script.SetVariable(args.variableId,script.GetConstant(args.constId));
             }
-            private void RunILCodeOneArgs(string code){
-                /* the code has one args, so we split the code into two parts */
+            public void Def(opParams args){
+                /* defination a new function */
 
-                string[] G = SharkScriptUtil.SplitStringWithWhiteSpace(code,2);
-                SharkScriptUtil.ExtractObjectFromDict<OP_ONEARGS>(G[0],API_ONEARGS)(G[1]);
+                script.opDefination();
             }
-            private void RunILCodeTwoArgs(string code){
+            public void EndDef(opParams args){
+                /* move function to result register */
 
-                string[] G = SharkScriptUtil.SplitStringWithWhiteSpace(code,3);
-                SharkScriptUtil.ExtractObjectFromDict<OP_TWOARGS>(G[0],API_TWOARGS)(G[1],G[2]);
+                Registers[REG_RESULT].Data = script.GetFunctionBuf();
             }
-            public static string GetPushVarName(string code){
-                /* 当目标函数是一个var变量时，获取该var的变量名
-                执行该函数前必须要求目标参数是一个PUSH_VAR的有效指令 */
+            public void AddParam(opParams args){
+                /* add new params */
 
-                return SharkScriptUtil.SplitStringWithWhiteSpace(code,2)[1];
+                script.opAddParams(args.variableId);
+            }
+            public void AddCode(opParams args){
+                /* add new code */
+
+                script.opWriteCode(args);
+            }
+            public void Ret(opParams args){
+                /* set return value */
+
+                script.ReturnLast();
+            }
+            public void Constant(opParams args){
+                /* write constant value to script's constant list */
+
+                script.AddConstant(SkVal.ConstFromString(args.position,args.variableId));
+            }
+            public void LoadNull(opParams args){
+                /* 在指定的寄存器中写入一个空值 */
+
+                Registers[args.position].Data = SkObject.None;
+            }
+            public void PushNull(opParams args){
+                /* 将一个空值压入参数栈 */
+
+                paramsStk.Peek().Add(SkObject.None);
+            }
+            public void opAdd(opParams args){
+                /* add the data of register 0 and 1, if string type value, then combined them
+                if number value, then add them, otherwise, throw type error */
+
+                Registers[REG_RESULT].Data = SharkAPI.Add(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opSub(opParams args){
+                /* reg_result = r0 - r1*/
+
+                Registers[REG_RESULT].Data = SharkAPI.Sub(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opNeg(opParams args){
+                /* reg_result = -r1 */
+
+                Registers[REG_RESULT].Data = SharkAPI.Neg(Registers[REG_0].Data);
+            }
+            public void opMul(opParams args){
+                /* reg_result = r1 * r2*/
+
+                Registers[REG_RESULT].Data = SharkAPI.Mul(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opDiv(opParams args){
+                /* reg_result = r1 * */
+
+                Registers[REG_RESULT].Data = SharkAPI.Div(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opPow(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Pow(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opMod(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Mod(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opGt(opParams args){
+
+                Console.WriteLine($"正在对比的值 {Registers[REG_0].Data.GetValue<SkVal>()} > {Registers[REG_1].Data.GetValue<SkVal>()}");
+                Registers[REG_RESULT].Data = SharkAPI.Gt(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opLt(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Lt(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opGe(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Ge(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opLe(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Le(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opEq(opParams args){
+
+                Registers[REG_RESULT].Data = new SkObject(new SkVal(Registers[REG_0].Data.Equal(Registers[REG_1].Data)));
+            }
+            public void opNe(opParams args){
+
+                Registers[REG_RESULT].Data = new SkObject(new SkVal(!Registers[REG_0].Data.Equal(Registers[REG_1].Data)));
+            }
+            public void opAnd(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.And(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opOr(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Or(Registers[REG_0].Data,Registers[REG_1].Data);
+            }
+            public void opNot(opParams args){
+
+                Registers[REG_RESULT].Data = SharkAPI.Not(Registers[REG_0].Data);
             }
         }
     }
+    
+    public enum SkValType{
+        /* including int,float,string and boolean
+        these data is not a object type value */
 
-    public enum SharkValueType{
-
-        STRING,
+        BOOLEAN,
         INT,
         FLOAT,
-        //BOOL
+        STRING
     }
-
-    public enum SharkType{
-        /* the data type of shark */
+    public enum SkDataType{
+        /* include value,obj,list,func and nil */
 
         VALUE,
         OBJ,
         LIST,
         FUNC,
-        NONE
+        NULL
     }
-    
-    public class SharkObject{
-        /* all the value in the Shark would yield from SharkObject */
+    public class SkObject{
+        /* all data in shark would extend from this */
 
-        public static SharkObject None = new SharkObject();
+        public static SkObject None = new SkObject();
 
-        SharkType __type;
-        object value;
-
-        public SharkType type{
-            get{return __type;}
-        }
-        public SharkObject(){
-            /* build up a new shark object */
-
-            __type = SharkType.NONE;
-            value = null;
-        }
-        public SharkObject(__shark_value value){
-            __type = SharkType.VALUE;
-            this.value = value;
-        }
-        public SharkObject(__shark_function func){
-            __type = SharkType.FUNC;
-            this.value = func;
-        }
-        public SharkObject(__shark_list list){
-            __type = SharkType.LIST;
-            this.value = list;
-        }
-        public SharkObject(object data){
-            __type = SharkType.OBJ;
-            this.value = data;
-        }
-        public T GetValue<T>(){
-
-            return (T)this.value;
-        }
-        public void Rewrite(SharkObject O){
-
-            __type = O.type;
-            switch(O.type){
-                case SharkType.OBJ:
-                this.value = O.GetValue<object>();
-                break;
-                case SharkType.FUNC:
-                this.value = O.GetValue<__shark_function>();
-                break;
-                case SharkType.LIST:
-                this.value = O.GetValue<__shark_list>();
-                break;
-                case SharkType.VALUE:
-                this.value = O.GetValue<__shark_value>();
-                break;
-                case SharkType.NONE:
-                this.value = null;
-                break;
-            }
-        }
-        public void Rewrite(object data){
-            __type = SharkType.OBJ;
-            this.value = data;
-        }
-        public void Rewrite(__shark_list list){
-            __type = SharkType.LIST;
-            this.value = list;
-        }
-        public void Rewrite(__shark_function func){
-            __type = SharkType.FUNC;
-            this.value = func;
-        }
-        public void Rewrite(__shark_value value){
-            __type = SharkType.VALUE;
-            this.value = value;
-        }
-        public void Rewrite(){
-            __type = SharkType.NONE;
-            this.value = null;
-        }
-    }
-
-    public delegate SharkObject SharkFunction(__shark_list args);
-
-    public class __shark_function{
-        /* define the shark function, the shark function 
-        has two type, one is the cs function, it will be saved in the type of delegate
-        and another is IL code queue, in this type, function must be called with 
-        interpreter */
-
-        public enum FuncType{
-
-            CS,
-            SHARK
-        }
-
-        private SharkFunction func;
-        private Queue<string> ilcodes;
-        private SharkScope funcField;
-        FuncType __type;
-        public __shark_function(SharkFunction func){
-
-            __type = FuncType.CS;
-            this.func = func;
-            funcField = null;
-        }
-        public __shark_function(){
-
-            __type = FuncType.SHARK;
-            ilcodes = new Queue<string>();
-        }
-        public __shark_function(string[] codes,SharkScope filed){
-
-            __type = FuncType.SHARK;
-            ilcodes = new Queue<string>();
-            foreach(string line in codes){
-                ilcodes.Enqueue(line);
-            }
-            this.funcField = filed;
-        }
-        public FuncType type{
-
-            get{return __type;}
-        }
-        public __shark_function(string[] codes){
-
-            __type = FuncType.SHARK;
-            ilcodes = new Queue<string>();
-            foreach(string line in codes){
-                ilcodes.Enqueue(line);
-            }
-        }
-        public void InitializeField(){
-            /* 初始化函数的变量空间 */
-
-            funcField = new SharkScope();
-        }
-        public void AddVariable(string name,SharkObject variable){
-            /* 当该函数引用了一个内部的变量的时候，将该变量引用到SharkScope中 */
-
-            funcField.Save(name,variable);
-        }
-        public bool HasFunctionField(){
-            /* 检查函数有没有自己的作用域 */
-
-            return funcField != null;
-        }
-        public SharkObject FindObject(string key){
-            /* 找到目标变量 */
-
-            return funcField.FindObject(key);
-        }
-        public bool ContainsVariable(string key){
-            /* 检查是否存在目标变量 */
-
-            return funcField.ContainsKey(key);
-        }
-
-        public __shark_function Clone(){
-
-            
-            if(HasFunctionField()){
-                return new __shark_function(ilcodes.ToArray(),funcField);
-            }
-            return new __shark_function(ilcodes.ToArray());
-        }
-        public void AddILCode(string line){
-
-            ilcodes.Enqueue(line);
-        }
-        public SharkObject Call(__shark_list args){
-
-            return this.func(args);
-        }
-        public SharkObject Call(){
-
-            return this.func(__shark_list.emptyList);
-        }
-        public SharkObject Call(IL il){
-            /* the function define by */
-
-            while(ilcodes.Count > 0){
-                string line = ilcodes.Dequeue();
-                Console.WriteLine(line);
-                il.RunILCode(line);
-            }
-            return SharkObject.None;
-        }
-    }
-
-    public class __shark_list{
-        /* shark list can contained all type value of shark */
-        
-        public static __shark_list emptyList = new __shark_list();
-
-        private List<SharkObject> list;
-        public __shark_list(){
-            list = new List<SharkObject>();
-        }
-        public int Length{
-            get{return list.Count;}
-        }
-        public void Append(SharkObject item){
-            /* append a new object in the last position */
-
-            list.Add(item);
-        }
-        public void Remove(SharkObject item){
-            /* remove target item */
-
-            list.Remove(item);
-        }
-        public SharkObject Index(int idx){
-            /* get value of given index */
-
-            if(idx >= list.Count || idx < 0){
-                throw SharkScriptIndexError.defaultErr;
-            }
-            return list.ToArray()[idx];
-        }
-
-        public void Clear(){
-            /* remove all datas */
-
-            list.Clear();
-        }
-    }
-
-    public class __shark_value{
-        /* contain a simple value,three types including 
-        string,int and float */
-
-        private static SharkScriptTypeError __error = new SharkScriptTypeError("unknown type");
-        private static Type[] __type2index = new Type[]{
-            typeof(System.String),
-            typeof(System.Int32),
-            typeof(System.Single)
+        public static Type[] __type2idx = new Type[]{
+            typeof(SkVal),
+            typeof(SkList),
+            typeof(ICallable),
+            typeof(object)
         };
-        private SharkValueType __value_type;
-        private object __value;
 
-        public SharkValueType type{
-            get{return __value_type;}
+        private object data;
+        private SkDataType type;
+        
+        public SkObject(SkVal value){
+            
+            type = SkDataType.VALUE;
+            data = value;
         }
+        public SkObject(SkList value){
 
-        public __shark_value(object data){
-            /* initialize __value with given value
-            and set the __value_type dynamicly according to given value
-            note that target value must be int,float or string type
-            otherwise a RuntimeError will be thrown */
+            type = SkDataType.LIST;
+            data = value;
+        }
+        public SkObject(object value){
 
-            int __type = Array.IndexOf(__type2index,data.GetType());
-            if(__type == -1){
-                throw __error;
-            }else{
-                __value_type = (SharkValueType)__type;
-                __value = data;
+            type = SkDataType.OBJ;
+            data = value;
+        }
+        public SkObject(ICallable value){
+
+            type = SkDataType.FUNC;
+            data = value;
+        }
+        public SkObject(){
+
+            type = SkDataType.NULL;
+            data = null;
+        }
+        public SkDataType DataType{
+
+            get{return type;}
+        }
+        public bool Equal(SkObject other){
+
+            if(other.DataType == DataType){
+                if(IsNull){
+                    return true;
+                }else if(IsVal){
+                    return GetValue<SkVal>().RawData.Equals(other.GetValue<SkVal>().RawData);
+                }
+                return other.data == data;
             }
+            return !IsVal || other.data == data;
         }
         public T GetValue<T>(){
-            /* get the value saved in this variable */
+            /* cannot be null type */
 
-            return (T)__value;
+            return (T)data;
         }
         public override string ToString()
         {
-            return $"{__value_type.ToString()}:{__value}";
+            if(DataType == SkDataType.VALUE){
+                return ((SkVal)data).ToString();
+            }else if(DataType == SkDataType.LIST){
+                return ((SkList)data).ToString();
+            }else if(DataType == SkDataType.OBJ){
+                return data.ToString();
+            }else if(DataType == SkDataType.FUNC){
+                return ((SkFunc)data).ToString();
+            }else{
+                return "None";
+            }
+        }
+        public void Rewrite<T>(T value){
+
+            int idx = Array.IndexOf(__type2idx,value.GetType());
+            if(idx == -1){
+                throw SharkTypeError.defaultErr;
+            }
+            data = value;
+            type = (SkDataType)idx;
+        }
+        public void Clear(){
+
+            type = SkDataType.NULL;
+            data = null;
+        }
+        public bool IsVal{
+
+            get{return DataType == SkDataType.VALUE;}
+        }
+        public bool IsFunc{
+            get{return DataType == SkDataType.FUNC;}
+        }
+        public bool IsObject{
+            get{return DataType == SkDataType.OBJ;}
+        }
+        public bool IsNull{
+            get{return DataType == SkDataType.NULL;}
+        }
+        public bool IsList{
+            get{return DataType == SkDataType.LIST;}
+        }
+        public bool IsReference{
+            /* check if target value is reference */
+
+            get{return DataType == SkDataType.LIST || DataType == SkDataType.FUNC || DataType == SkDataType.OBJ || DataType == SkDataType.NULL;}
+        }
+        public SkObject CloneConstant(){
+            /* clone a constant value */
+
+            return new SkObject(((SkVal)data).Clone());
+        }
+    }
+
+    public class SkVal{
+        /* contains four base type value including int,float,string and boolean */
+
+        private static Type[] __type2idx = new Type[]{
+            typeof(System.Boolean),
+            typeof(System.Int32),
+            typeof(System.Single),
+            typeof(System.String)
+        };
+
+        private SkValType type;
+        private object data;
+
+        public static SkObject ConstFromString(int typeId,string source){
+
+            TokenType tkType = (TokenType)typeId;
+            switch(tkType){
+                case TokenType.BOOLEAN:
+                return new SkObject(new SkVal(bool.Parse(source)));
+                case TokenType.INT:
+                return new SkObject(new SkVal(int.Parse(source)));
+                case TokenType.FLOAT:
+                return new SkObject(new SkVal(float.Parse(source)));
+                case TokenType.STRING:
+                return new SkObject(new SkVal(Regex.Unescape(source.Trim(TokenSet.varString))));
+            }
+            throw new SharkTypeError("未知或不支持的字面量类型");
+        }
+
+        public SkVal(object value){
+            /* type is int */
+
+            int tp = Array.IndexOf(__type2idx,value.GetType());
+            if(tp == - 1){
+                throw SharkTypeError.defaultErr;
+            }
+            type = (SkValType)tp;
+            data = value;
+        }
+        public object RawData{
+            get{return data;}
+            set{data = value;}
+        }
+        public SkVal Clone(){
+
+            return new SkVal(data);
+        }
+        public SkValType ValType{
+            /* type cannot be changed */
+
+            get{return type;}
+        }
+        public T GetValue<T>(){
+            /* get value from this variable */
+
+            return (T)data;
+        }
+        public float GetFloat(){
+            return Convert.ToSingle(data);
+        }
+        public int GetInt(){
+            return Convert.ToInt32(data);
+        }
+        public bool GetBool(){
+            return Convert.ToBoolean(data);
+        }
+        public override string ToString()
+        {
+            return data.ToString();
+        }
+        public bool IsText{
+            get{return type == SkValType.STRING;}
+        }
+        public bool IsNumber{
+            get{return type == SkValType.FLOAT || type == SkValType.INT;}
+        }
+        public bool IsInt{
+            get{return type == SkValType.INT;}
+        }
+        public bool IsFloat{
+            get{return type == SkValType.FLOAT;}
+        }
+        public bool IsBoolean{
+            get{return type == SkValType.BOOLEAN;} 
+        }
+    }
+
+    public class SkList{
+        /* a list type value */
+
+        private List<SkObject> list;
+        public SkList(){
+
+            list = new List<SkObject>();
+        }
+        public int Size{
+
+            get{return list.Count;}
+        }
+        public void Add(SkObject element){
+            /*append a new node to this list*/
+
+            list.Add(element);
+        }
+        public void Remove(SkObject element){
+            /* remove target object */
+
+            list.Remove(element);
+        }
+        public bool Contains(SkObject element){
+            /* check if given item is in this list */
+
+            return list.Contains(element);
+        }
+        public SkObject Index(int idx){
+            /* get the element at target position */
+
+            if(idx >= Size){
+                throw new SharkIndexError();
+            }
+            return list[idx];
+        }
+        public SkObject Pop(){
+            /* remove last element of this list */
+
+            int idx = Size - 1;
+            SkObject O = list[idx];
+            list.RemoveAt(idx);
+            return O;
+        }
+        public override string ToString()
+        {
+            string buf = string.Empty;
+            foreach(SkObject obj in list){
+                buf += obj.ToString() + ",";
+            }
+            return $"[{buf.TrimEnd(',')}]";
+        }
+    }
+
+    public interface IJumper{
+        /* 一种跳转器 */
+
+        public void Jmp(int offset);
+        public void Goto(int addr);
+        public bool IsFunction();
+    }
+
+    public delegate SkObject __csfunc(SkList args);
+    /* Shark函数的CS形态 */
+
+    public interface ICallable{
+        /* this object can be called */
+
+        public SkObject Call(SkList args);
+        public void Call(SharkInterpreter interpreter,SkList args);
+        public bool IsSharkFunction();
+        public SharkField GetSharkField();
+    }
+    public struct CSFunc:ICallable{
+        /* function packed from C# */
+
+        __csfunc func;
+        public CSFunc(__csfunc func){
+            this.func = func;
+        }
+        public SkObject Call(SkList args){
+            return func(args);
+        }
+        public void Call(SharkInterpreter interpreter,SkList args){
+            /* this is not support */
+
+            throw new SharkTypeError("CS风格的函数不支持使用解释器执行");
+        }
+        public bool IsSharkFunction(){
+            return false;
+        }
+        public SharkField GetSharkField(){
+            return null;
+        }
+    }
+
+    public class SkFunc:ICallable,IJumper{
+        /* the shark function defination class*/
+
+        public List<string> paramsList;
+        public SharkField scope;
+        private List<SharkCommand> opCmds;
+        public int Addr{get;set;}
+        public bool hasShuted;
+
+        public SkFunc(){
+            /* create a new function */
+
+            paramsList = new List<string>();
+            opCmds = new List<SharkCommand>();
+            scope = new SharkField();
+            Addr = 0;
+        }
+        public bool IsFunction(){
+            return true;
+        }
+        public void Jmp(int offset){
+            Addr += offset;
+        }
+        public void Goto(int addr){
+            Addr = addr;
+        }
+        public void WriteOperations(SharkCommand cmd){
+            /* add new commands to this function */
+
+            opCmds.Add(cmd);
+        }
+        public bool CanSearchName(string Name){
+            /*检查该函数是否有目标参数*/
+
+            return scope.Contains(Name);
+        }
+        public SkObject Call(SkList args){
+            /* call this function and return value */
+
+            throw new SharkTypeError("Shark风格的函数不支持直接执行");
+        }
+        public void Call(SharkInterpreter interpreter,SkList args){
+            /* 执行Shark风格的函数 */
+
+            hasShuted = false;
+            for(int i = 0;i < args.Size;i++){
+                scope.Rewrite(paramsList[i],args.Index(i));
+            }
+            foreach(SharkCommand cmd in IterCommands()){
+                interpreter.RunSingle(cmd);
+            }
+            if(!hasShuted){
+                interpreter.RunSingle(SharkCommand.Return);
+            }
+        }
+        public IEnumerable<SharkCommand> IterCommands(){
+
+            while(Addr < opCmds.Count){
+                yield return opCmds[Addr];
+                Addr ++;
+            }
+        }
+        public void ShutDown(){
+            Addr = opCmds.Count;
+            hasShuted = true;
+        }
+        public bool IsSharkFunction(){
+
+            return true;
+        }
+        public SharkField GetSharkField(){
+
+            return scope;
+        }
+        public SkFunc Clone(){
+
+            SkFunc clone = new SkFunc();
+            foreach(SharkCommand cmd in opCmds){
+                clone.opCmds.Add(cmd);
+            }
+            clone.scope = scope.Clone();
+            clone.paramsList = paramsList;
+            return clone;
         }
     }
 }

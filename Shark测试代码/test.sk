@@ -1,0 +1,7 @@
+print("\\//h\ne\"llo world\n \\'\r\"'");     //利用C#对字符串进行转义
+x = function(){
+    //测试函数
+    print("hello world");//测试代码
+};//测试注释
+
+print(x());

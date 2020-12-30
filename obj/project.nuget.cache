@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "cFX5GEGfPdTFUBtPm+JXSx9LnaEodmRX4NUSOoQZPB0Zy15EXwSdEh2kT0tNeo9vjugeEOPr9WpKgAEiER6YrA==",
+  "dgSpecHash": "gC4komZfCNlkyGbWF/2w06A3iH2tTOlrsLiAT9CHIlprFjtPm+SNs4+gvxe8FJX3IutiOWFhTz2OJlJ08WVKIA==",
   "success": true,
   "projectFilePath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\MECHREVO\\.nuget\\packages\\newtonsoft.json\\12.0.3\\newtonsoft.json.12.0.3.nupkg.sha512"
+  ],
   "logs": []
 }
