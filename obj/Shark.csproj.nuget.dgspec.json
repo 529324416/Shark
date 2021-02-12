@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj": {}
+    "C:\\Users\\MECHREVO\\Desktop\\关于程序\\Shark0.1\\Shark.csproj": {}
   },
   "projects": {
-    "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj": {
+    "C:\\Users\\MECHREVO\\Desktop\\关于程序\\Shark0.1\\Shark.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
+        "projectUniqueName": "C:\\Users\\MECHREVO\\Desktop\\关于程序\\Shark0.1\\Shark.csproj",
         "projectName": "Shark",
-        "projectPath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
+        "projectPath": "C:\\Users\\MECHREVO\\Desktop\\关于程序\\Shark0.1\\Shark.csproj",
         "packagesPath": "C:\\Users\\MECHREVO\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\obj\\",
+        "outputPath": "C:\\Users\\MECHREVO\\Desktop\\关于程序\\Shark0.1\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\MECHREVO\\AppData\\Roaming\\NuGet\\NuGet.Config"

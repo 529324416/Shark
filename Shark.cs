@@ -2790,12 +2790,17 @@ namespace Shark
             public static CodeParser parser = new CodeParser();
             public static SharkILGenerator generator = new SharkILGenerator();
 
-            public static SharkScript ReadScript(string filepath)
+            public static SharkScript ReadFile(string filepath)
             {
                 /* read source code and create a new shark script object for this */
 
                 string sourceCode = SharkUtil.ReadSource(filepath);
-                scanner.LoadSource(sourceCode);
+                return ReadText(sourceCode);
+            }
+            public static SharkScript ReadText(string src){
+                /* read string type value and create a new Shark Script for it */
+
+                scanner.LoadSource(src);
                 parser.LoadTokens(scanner.Scan());
                 Tuple<List<SharkCommand>, List<SharkCommand>> O = generator.GenForScript(parser.GenAST());
                 SharkScript _ = new SharkScript(O.Item2, O.Item1);
@@ -2816,6 +2821,16 @@ namespace Shark
             private List<List<string>> globalVars;
 
             public int Addr { get; set; }
+            public List<SharkCommand> Constants{
+                get{return constants;}
+            }
+            public List<SharkCommand> Codes{
+                get{return codes;}
+            }
+            public SharkCommand NextCommand{
+                get{return codes[Addr];}
+            }
+
             private Stack<IJumper> LastObjs;
             private IJumper now;
             private SkFunc definationBuf;
@@ -2863,11 +2878,11 @@ namespace Shark
                 interpreter.LoadScript(this);
                 foreach (SharkCommand cmd in constants)
                 {
-                    interpreter.RunSingle(cmd);
+                    interpreter.RunCommand(cmd);
                 }
                 while (IsRunning)
                 {
-                    interpreter.RunSingle(this.codes[Addr]);
+                    interpreter.RunCommand(this.codes[Addr]);
                     Addr++;
                 }
             }
@@ -3185,12 +3200,25 @@ namespace Shark
                     opNot
                 };
             }
-            public void RunSingle(SharkCommand cmd)
+            public void RunCommand(SharkCommand cmd)
             {
                 /* run single command */
 
                 //Console.WriteLine(cmd);
                 ops[cmd.opCode](cmd.opArgs);
+            }
+            public void RunScript(SharkScript script){
+                /* 执行Shark脚本 */
+
+                script.Addr = 0;
+                LoadScript(script);
+                foreach(SharkCommand cmd in script.Constants){
+                    RunCommand(cmd);
+                }
+                while(script.IsRunning){
+                    RunCommand(script.NextCommand);
+                    script.Addr ++;
+                }
             }
 
             public void LoadScript(SharkScript script)
@@ -3874,7 +3902,6 @@ namespace Shark
             throw new SharkException("CS风格的函数无法在Shark中终止");
         }
     }
-
     public class SkFunc : ICallable, IJumper
     {
         /* the shark function defination class*/
@@ -3941,12 +3968,12 @@ namespace Shark
             WriteParamsList(args);
             foreach (SharkCommand cmd in IterCommands())
             {
-                interpreter.RunSingle(cmd);
+                interpreter.RunCommand(cmd);
             }
             if (!hasShuted)
             {
                 interpreter.GetRegister(3).Data = SkObject.None;
-                interpreter.RunSingle(SharkCommand.Return);
+                interpreter.RunCommand(SharkCommand.Return);
             }
         }
         public IEnumerable<SharkCommand> IterCommands()

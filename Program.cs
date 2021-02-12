@@ -19,35 +19,15 @@ namespace Shark
             //由于递归调用同一个函数的时候，所有的函数对象共用同一个域的问题
             //导致了bug。
 
-            string[] Test = new string[]{
-                "Shark测试代码/test1.sk",
-            };
             SharkInterpreter interpreter = new SharkInterpreter();
-            for(int i = 0;i < Test.Length;i ++){
-                SharkScript script_test = SharkScript.ReadScript(Test[i]);
-                script_test.SetVariable("print",new SkObject(new CSFunc(SharkPrint)));
-
-                Console.WriteLine("-----------中间代码开始-----------");
-                script_test.ShowCommands();
-                Console.WriteLine("-----------中间代码结束-----------");
-                Console.WriteLine("-----------脚本执行结果开始-----------");
-                script_test.RunScript(interpreter);
-                Console.WriteLine("-----------脚本执行结果结束-----------");
-            }
+            SharkScript script = SharkScript.ReadFile("Shark测试代码/test1.sk");
 
 
+            SkObject func = new SkObject(new CSFunc(SkPrint));
+            script.SetVariable("print",func);
+            interpreter.RunScript(script);
 
-        }
-        public struct TestS{
-            
-            public TestMachine a;
-            public TestS(int a){
-                this.a = new TestMachine();
-                this.a.a = a;
-            }
-        }
-        public static void Test(int a){
-            Console.WriteLine(a);
+
         }
         public static string ReadFile(string filepath){
 
@@ -86,7 +66,7 @@ namespace Shark
             }
             return obj;
         }
-        public static SkObject SharkPrint(SkList args){
+        public static SkObject SkPrint(SkList args){
 
             SkObject Obj = args.Index(0);
             if(Obj.IsVal){
@@ -96,10 +76,10 @@ namespace Shark
             }
             return SkObject.None;
         }
-    }
+        public static SkObject GetTime(SkList args){
 
-    public class TestMachine{
-
-        public int a = 1;
+            Console.WriteLine(DateTime.Now);
+            return SkObject.None;
+        }
     }
 }
