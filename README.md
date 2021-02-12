@@ -187,16 +187,6 @@ namespace Program{
             interpreter.RunScript(MyScript);
             //执行Shark脚本
         }
-        public static SkObject SkPrint(SkList args){
-
-            SkObject Obj = args.Index(0);
-            if(Obj.IsVal){
-                Console.WriteLine(Obj.GetValue<SkVal>().ToString()); 
-            }else{
-                Console.WriteLine(Obj.ToString());
-            }
-            return SkObject.None;
-        }
     }
 }
 ```
