@@ -25,8 +25,17 @@ namespace Shark{
 
     namespace SharkLexer{
 
+
+        public enum SharkTokenType{
+
+            TOKEN_UNKNOWN,
+            TOKEN_ID,
+            TOKEN_NUM,
+            TOKEN_STRING,
+        }
+
         public static class SharkLexerUtils{
-            
+
         }
     }
 }
