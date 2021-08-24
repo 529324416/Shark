@@ -21,4 +21,12 @@ namespace Shark{
             return _Ret;
         }
     }
+
+
+    namespace SharkLexer{
+
+        public static class SharkLexerUtils{
+            
+        }
+    }
 }
