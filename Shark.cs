@@ -137,6 +137,8 @@ namespace Shark{
             public static char newLine = '\n';
             public static char carriageReturn = '\r';
 
+            public delegate bool charChekcer(char value);
+
             public static bool isSpace(char value){
                 return value == space || value == tab || value == carriageReturn;
             }
@@ -153,6 +155,12 @@ namespace Shark{
                     return true;
                 }
                 return false;
+            }
+            public static bool isOctChar(char value){
+                return value >= '0' && value <= '7';
+            }
+            public static bool isBinChar(char value){
+                return value == '0' || value == '1';
             }
 
             public static SkToken[] systemKeywords = new SkToken[]{
@@ -389,6 +397,17 @@ namespace Shark{
                     case '\"':
                     return makeToken(SkTokenType.TOKEN_STRING, parseString());
 
+                    case '0':
+                    if(matchChar('x')){
+                        return makeToken(SkTokenType.TOKEN_NUM, parseSpecNumber(SharkLexerCore.isHexChar, "invalid hex number"));
+                    }else if(matchChar('o')){
+                        return makeToken(SkTokenType.TOKEN_NUM, parseSpecNumber(SharkLexerCore.isOctChar, "invalid oct number"));
+                    }else if(matchChar('b')){
+                        return makeToken(SkTokenType.TOKEN_NUM, parseSpecNumber(SharkLexerCore.isBinChar, "invalid bin number"));
+                    }else{
+                        return makeToken(SkTokenType.TOKEN_NUM, C.ToString());
+                    }
+
                     default:
                     /*
                         1.解析标识符(ID和系统关键字)
@@ -396,6 +415,8 @@ namespace Shark{
                     */
                     if(char.IsLetter(C) || C == '_'){
                         return parseID();
+                    }else if(char.IsDigit(C)){
+                        return makeToken(SkTokenType.TOKEN_NUM, parseNumber());
                     }
                     
 
@@ -455,13 +476,103 @@ namespace Shark{
                 throw new SharkSyntaxError($"expect \"*/\" at line {currentLine.ToString()}");
             }
             ///<summary>
+            /// 解析十六进制, 八进制或者二进制的数字
+            ///</summary>
+            private string parseSpecNumber(SharkLexerCore.charChekcer chekcer, string errInfo){
+
+                int positionStart = currentPos - 2;
+                int length = 0;
+                char buf;
+                while(hasMore){
+                    buf = nextChar;
+                    if(chekcer(buf)){
+                        length ++;
+                        continue;
+                    }
+                    currentPos --;
+                    break;
+                }
+
+                if(length > 0){
+                    return takeString(positionStart, currentPos);
+                }
+                throw new SharkSyntaxError($"{errInfo} at line {currentLine.ToString()}");
+            }
+
+            ///<summary>
+            /// 解析普通数字
+            ///</summary>
+            private string parseNumber(){
+
+                int positionStart = currentPos - 1;
+
+                char buf;
+                while(hasMore){
+                    buf = nextChar;
+                    if(char.IsDigit(buf)){
+                        continue;
+                    }else if(buf == '.'){
+                        return numberParseFloat(positionStart);
+                    }else if(buf == 'e'){
+                        return numberParserE(positionStart);
+                    }else{
+                        currentPos --;
+                        break;
+                    }
+                }
+                return takeString(positionStart, currentPos);
+            }
+
+            ///<summary>
+            /// 解析小数部分
+            ///</summary>
+            private string numberParseFloat(int positionStart){
+
+                char buf;
+                while(hasMore){
+                    buf = nextChar;
+                    if(char.IsDigit(buf)){
+                        continue;
+                    }else if(buf == 'e'){
+                        return numberParserE(positionStart);
+                    }else{
+                        currentPos --;
+                        break;
+                    }
+                }
+                return takeString(positionStart, currentPos);
+            }
+
+            ///<summary>
+            /// 解析数字后的科学计数部分
+            ///</summary>
+            private string numberParserE(int positionStart){
+
+                char buf;
+                int length = 0;
+                while(hasMore){
+                    buf = nextChar;
+                    if(char.IsDigit(buf)){
+                        length ++;
+                        continue;
+                    }
+                    currentPos --;
+                    break;
+                }
+                if(length > 0){
+                    return takeString(positionStart, currentPos);
+                }
+                throw new SharkSyntaxError($"expect number after \"{takeString(positionStart, currentPos - 1)}\"");
+            }
+
+            ///<summary>
             /// 解析标识符,包括ID和系统关键字
             ///</summary>
             private SkToken parseID(){
 
                 //当已经发现了是普通的字符时, 第一个字符也需要被包括进来.
                 int positionStart = currentPos - 1;
-                string cnt;
+                int offset = 0;
 
                 char buf;
                 while(hasMore){
@@ -469,11 +580,11 @@ namespace Shark{
                     if(char.IsLetterOrDigit(buf) || buf == '_'){
                         continue;
                     }else{
-                        cnt = takeString(positionStart, currentPos - 1);
-                        return makeToken(SharkLexerCore.isIdOrKeyword(cnt), cnt);
+                        offset = -1;
+                        break;
                     }
                 }
-                cnt = takeString(positionStart, currentPos);
+                string cnt = takeString(positionStart, currentPos + offset);
                 return makeToken(SharkLexerCore.isIdOrKeyword(cnt), cnt);
             }
 
