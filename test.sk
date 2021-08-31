@@ -1,2 +1,1 @@
-this
-.+(*)
+print(false).call(2 + 3)

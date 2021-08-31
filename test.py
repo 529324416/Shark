@@ -1,1 +1,1 @@
-print(1e4)
+x = "hello world"

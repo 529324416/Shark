@@ -14,3 +14,5 @@ C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.dll
 C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\ref\Shark.dll
 C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.pdb
 C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.genruntimeconfig.cache
+C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\Newtonsoft.Json.dll
+C:\Users\MECHREVO\Desktop\Shark\obj\Debug\net5.0\Shark.csproj.CopyComplete

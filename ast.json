@@ -1,0 +1,48 @@
+{
+  "title": "print(false).call(2 + 3)",
+  "data": {
+    "name": "call",
+    "children": [
+      {
+        "name": "TOKEN_DOT",
+        "children": [
+          {
+            "name": "call",
+            "children": [
+              {
+                "name": "print"
+              },
+              {
+                "name": "list",
+                "children": [
+                  {
+                    "name": "false"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "call"
+          }
+        ]
+      },
+      {
+        "name": "list",
+        "children": [
+          {
+            "name": "TOKEN_ADD",
+            "children": [
+              {
+                "name": "2"
+              },
+              {
+                "name": "3"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
