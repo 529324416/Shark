@@ -7,11 +7,11 @@
 
 </head>
 <body>
-    <div id="9cc3164c462640a9b355ec2bd1da49dc" class="chart-container" style="width:900px; height:500px;"></div>
+    <div id="33ad6e5667324fd79b55e2c355787dc5" class="chart-container" style="width:900px; height:500px;"></div>
     <script>
-        var chart_9cc3164c462640a9b355ec2bd1da49dc = echarts.init(
-            document.getElementById('9cc3164c462640a9b355ec2bd1da49dc'), 'white', {renderer: 'canvas'});
-        var option_9cc3164c462640a9b355ec2bd1da49dc = {
+        var chart_33ad6e5667324fd79b55e2c355787dc5 = echarts.init(
+            document.getElementById('33ad6e5667324fd79b55e2c355787dc5'), 'white', {renderer: 'canvas'});
+        var option_33ad6e5667324fd79b55e2c355787dc5 = {
     "animation": true,
     "animationThreshold": 2000,
     "animationDuration": 1000,
@@ -49,49 +49,55 @@
     "series": [
         {
             "type": "tree",
-            "name": "print(false).call(2 + 3)",
+            "name": "1 + 2 * 3 - 6 / 5 + 4 * 3",
             "data": [
                 {
-                    "name": "call",
+                    "name": "TOKEN_ADD",
                     "children": [
                         {
-                            "name": "TOKEN_DOT",
+                            "name": "TOKEN_SUB",
                             "children": [
                                 {
-                                    "name": "call",
+                                    "name": "TOKEN_ADD",
                                     "children": [
                                         {
-                                            "name": "print"
+                                            "name": "1"
                                         },
                                         {
-                                            "name": "list",
+                                            "name": "TOKEN_MUL",
                                             "children": [
                                                 {
-                                                    "name": "false"
+                                                    "name": "2"
+                                                },
+                                                {
+                                                    "name": "3"
                                                 }
                                             ]
                                         }
                                     ]
                                 },
                                 {
-                                    "name": "call"
+                                    "name": "TOKEN_DIV",
+                                    "children": [
+                                        {
+                                            "name": "6"
+                                        },
+                                        {
+                                            "name": "5"
+                                        }
+                                    ]
                                 }
                             ],
                             "collapsed": "false"
                         },
                         {
-                            "name": "list",
+                            "name": "TOKEN_MUL",
                             "children": [
                                 {
-                                    "name": "TOKEN_ADD",
-                                    "children": [
-                                        {
-                                            "name": "2"
-                                        },
-                                        {
-                                            "name": "3"
-                                        }
-                                    ]
+                                    "name": "4"
+                                },
+                                {
+                                    "name": "3"
                                 }
                             ]
                         }
@@ -153,13 +159,13 @@
     "title": [
         {
             "text": "ast generator testing",
-            "subtext": "print(false).call(2 + 3)",
+            "subtext": "1 + 2 * 3 - 6 / 5 + 4 * 3",
             "padding": 5,
             "itemGap": 10
         }
     ]
 };
-        chart_9cc3164c462640a9b355ec2bd1da49dc.setOption(option_9cc3164c462640a9b355ec2bd1da49dc);
+        chart_33ad6e5667324fd79b55e2c355787dc5.setOption(option_33ad6e5667324fd79b55e2c355787dc5);
     </script>
 </body>
 </html>

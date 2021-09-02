@@ -14,6 +14,7 @@ namespace Shark
         static void Main(string[] args)
         {
             TEST_Parser("./test.sk");
+            Console.WriteLine(10.ToString());
         }
         static void TEST_Lexer(string filepath){
 
@@ -31,7 +32,7 @@ namespace Shark
             SkLexer lexer = new SkLexer(source);
             DEBUG_SkParser parser = new DEBUG_SkParser();
             parser.LoadTokens(lexer.Parse());
-            SkAST ast = parser.nextLogicBinOp();
+            SkAST ast = parser.nextMathBinOp_Low();
 
             SaveAsJson(ast, source);
             RenderToHtml();

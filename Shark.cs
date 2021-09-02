@@ -75,6 +75,7 @@ namespace Shark{
 
             TOKEN_THIS,
             TOKEN_IMPORT,
+            TOKEN_GLOBAL,
 
             // split sign
             TOKEN_COMMA,                    //,
@@ -93,6 +94,7 @@ namespace Shark{
             TOKEN_MUL,                      // *
             TOKEN_DIV,                      // /
             TOKEN_MOD,                      // %
+            TOKEN_POW,                      // ^
             TOKEN_ASSIGN,                   // =
             TOKEN_ASSIGN_ADD,               // +=
             TOKEN_ASSIGN_SUB,               // -=
@@ -204,7 +206,9 @@ namespace Shark{
                 new SkToken(SkTokenType.TOKEN_NULL, "null"),
                 new SkToken(SkTokenType.TOKEN_THIS, "this"),
                 new SkToken(SkTokenType.TOKEN_IMPORT, "import"),
+                new SkToken(SkTokenType.TOKEN_GLOBAL, "global"),
                 new SkToken(SkTokenType.TOKEN_UNKNOWN, null)
+                
             };
 
             public static char[] castList = new char[]{
@@ -400,6 +404,9 @@ namespace Shark{
 
                     case '.':
                     return makeToken(SkTokenType.TOKEN_DOT);
+
+                    case '^':
+                    return makeToken(SkTokenType.TOKEN_POW);
 
                     case '=':
                     return matchChar('=')?makeToken(SkTokenType.TOKEN_EQUAL):makeToken(SkTokenType.TOKEN_ASSIGN);
@@ -794,13 +801,22 @@ namespace Shark{
                     case SkTokenType.TOKEN_TRUE:
                     return new SkAST(token.tokenContent);
 
+                    case SkTokenType.TOKEN_STRING:
+                    return nextStringChecker(new SkAST(token.tokenContent));
+
+                    case SkTokenType.TOKEN_NULL:
+                    return new SkAST(token.tokenContent);
+
                     case SkTokenType.TOKEN_ID:
                     return nextIDChcker(new SkAST(token.tokenContent));
+
+                    case SkTokenType.TOKEN_FUNC:
+                    return nextAnonyFunctionDef();
 
                     case SkTokenType.TOKEN_LEFT_PAREN:
                     SkAST exp = nextLogicBinOp();
                     if(safeMatchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
-                        return exp;
+                        return nextIDChcker(exp);
                     }else{
                         throw new SharkSyntaxError($"expect \")\" at line {token.line}");
                     }
@@ -808,6 +824,14 @@ namespace Shark{
                     default:
                     throw new SharkSyntaxError($"invalid syntax at line {token.line}");
                 }
+            }
+
+            public SkAST nextAnonyFunctionDef(){
+
+                SkAST functionDef = new SkAST("FUNCTION_DEF_ANONY", 2);
+                functionDef.LeftNode = nextFormalParamlist();
+                functionDef.RightNode = nextBody();
+                return functionDef;
             }
 
             /// <summary>
@@ -829,11 +853,60 @@ namespace Shark{
 
                 SkAST exp = nextMathBinOp_Low();
                 if(safeMatchToken(SkTokenType.TOKEN_RIGHT_BRACKETS)){
-                    O = SkAST.upInsert(O, "Index", 2);
+                    O = SkAST.upInsert(O, "OP_INDEX", 2);
                     O.RightNode = exp;
                     return O;
                 }
                 throw new SharkSyntaxError($"expect \"]\" at line {0}");
+            }
+
+            public SkAST nextStringChecker(SkAST O){
+                if(matchToken(SkTokenType.TOKEN_DOT)){
+                    O = SkAST.upInsert(O, "OP_DOT", 2);
+                    SkToken token = getNextToken(false);
+                    if(token == SkTokenType.TOKEN_ID){
+                        tokens.Dequeue();
+                        O.RightNode = nextIDChcker(new SkAST(token.tokenContent));
+                        return O;
+                    }
+                    throw new SharkSyntaxError($"expect variable name after \".\" at line {token.line}");        
+                }
+                return O;
+            }
+
+            public SkAST nextFormalParamlist(){
+
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    SkToken token;
+                    List<SkAST> paramlist = new List<SkAST>();
+                    while(true){
+                        token = getNextToken(false);
+                        if(token == SkTokenType.TOKEN_ID){
+                            tokens.Dequeue();
+                            paramlist.Add(new SkAST(token.tokenContent));
+                            token = getNextToken(false);
+                            if(token == SkTokenType.TOKEN_COMMA){
+                                tokens.Dequeue();
+                                continue;
+                            }else if(token == SkTokenType.TOKEN_RIGHT_PAREN){
+                                tokens.Dequeue();
+                                break;
+                            }else{
+                                throw new SharkSyntaxError($"形式参数列表中遇到了不符合规范的符号,在第{token.line}行");
+                            }
+                        }else if(token == SkTokenType.TOKEN_COMMA){
+                            throw new SharkSyntaxError($"参数列表不符合规范,在第{token.line}行");
+                        }else{
+                            throw new SharkSyntaxError($"形式参数列表中遇到了不符合规范的符号,在第{token.line}行");
+                        }
+                    }
+                    SkAST args = new SkAST("DATA_FORMAL_PARAMS", paramlist.Count);
+                    for(int i = 0; i < paramlist.Count; i ++){
+                        args.SetChildren(i, paramlist[i]);
+                    }
+                    return args;
+                }
+                throw new SharkSyntaxError("形式参数列表应该以左括号开始, 在{}行");
             }
 
             /// <summary>
@@ -851,7 +924,7 @@ namespace Shark{
 
                     case SkTokenType.TOKEN_LEFT_PAREN:
                         tokens.Dequeue();
-                        O = SkAST.upInsert(variable, "call", 2);
+                        O = SkAST.upInsert(variable, "OP_CALL", 2);
                         O.RightNode = nextParamlist();
                         return nextIDChcker(O);
 
@@ -894,7 +967,7 @@ namespace Shark{
                         paramlist.Add(nextLogicBinOp());
                     }
                 }
-                SkAST ast = new SkAST("list", paramlist.Count);
+                SkAST ast = new SkAST("PARAMLIST", paramlist.Count);
                 for(int i = 0; i < paramlist.Count; i++){
                     ast.SetChildren(i, paramlist[i]);
                 }
@@ -909,7 +982,6 @@ namespace Shark{
             public SkAST nextMathUnOp(){
 
                 SkAST O;
-                SkToken token = getNextToken(false);
                 if(safeMatchToken(SkTokenType.TOKEN_SUB)){
                     O = new SkAST(SkTokenType.TOKEN_SUB.ToString(), 1);
                     O.LeftNode = nextFactor();
@@ -918,13 +990,24 @@ namespace Shark{
                 return nextFactor();
             }
 
+            public SkAST nextPowOp(){
+
+                SkAST O = nextMathUnOp();
+                if(matchToken(SkTokenType.TOKEN_POW)){
+                    O = SkAST.upInsert(O, SkTokenType.TOKEN_POW.ToString(), 2);
+                    O.RightNode = nextMathUnOp();
+                    return O;
+                }
+                return O;
+            }
+
             /// <summary>
             /// 高优先级_数学双目运算符解析轨道
             /// BinOp = '*' | '/' | '%'
             /// <summary>
             public SkAST nextMathBinOp_High(){
 
-                SkAST O = nextMathUnOp();
+                SkAST O = nextPowOp();
                 SkToken token; 
                 while(true){
 
@@ -933,13 +1016,11 @@ namespace Shark{
                     token.tokenType == SkTokenType.TOKEN_DIV || token.tokenType == SkTokenType.TOKEN_MOD){
                         tokens.Dequeue();
                         O = SkAST.upInsert(O, token.tokenContent, 2);
-                        O.RightNode = nextMathUnOp();
-                        // Console.WriteLine(token.tokenType.ToString());
-                        continue;
+                        O.RightNode = nextPowOp();
+                    }else{
+                        return O;
                     }
-                    break;
                 }
-                return O;
             }
 
             public SkAST nextMathBinOp_Low(){
@@ -952,12 +1033,10 @@ namespace Shark{
                         tokens.Dequeue();
                         O = SkAST.upInsert(O, token.tokenContent, 2);
                         O.RightNode = nextMathBinOp_High();
-                        // Console.WriteLine(token.tokenType.ToString());
-                        continue;
+                    }else{
+                        return O;
                     }
-                    break;
                 }
-                return O;
             }
             public SkAST nextCompare(){
 
@@ -999,6 +1078,163 @@ namespace Shark{
                     break;
                 }
                 return O;
+            }
+
+            /// <summary>
+            /// statement -> return exp | 
+            /// </summary>
+            public SkAST nextStatement(){
+
+                SkToken token = getNextToken(false);
+                if(token == SkTokenType.TOKEN_RETURN){
+                    tokens.Dequeue();
+                    SkAST exp = nextLogicBinOp();
+                    SkAST O = SkAST.upInsert(exp, "OP_RETURN", 1);
+                    return O;
+                }else if(token == SkTokenType.TOKEN_ID){
+                    tokens.Dequeue();
+                    SkAST variable = nextNameChecker(new SkAST(token.tokenContent));
+                    if(matchToken(SkTokenType.TOKEN_ASSIGN)){
+                        
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else if(matchToken(SkTokenType.TOKEN_ASSIGN_ADD)){
+                        
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN_ADD", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else if(matchToken(SkTokenType.TOKEN_ASSIGN_DIV)){
+
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN_DIV", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else if(matchToken(SkTokenType.TOKEN_ASSIGN_MUL)){
+
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN_MUL", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else if(matchToken(SkTokenType.TOKEN_ASSIGN_SUB)){
+
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN_SUB", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else if(matchToken(SkTokenType.TOKEN_ASSIGN_MOD)){
+                        variable = SkAST.upInsert(variable, "OP_ASSIGN_MOD", 2);
+                        variable.RightNode = nextLogicBinOp();
+                        return variable;
+                    }else{
+                        SkAST stat = nextIDChcker(variable);
+                        if(stat.content != "OP_CALL"){
+                            throw new SharkSyntaxError($"单独的变量名无法成为语句, 在第{token.line}行");
+                        }
+                        return stat;
+                    }
+                }else if(token == SkTokenType.TOKEN_IF){
+                    tokens.Dequeue();
+                    return nextIf();
+                }else if(token == SkTokenType.TOKEN_WHILE){
+                    tokens.Dequeue();
+                    return nextWhile();
+                }else if(token == SkTokenType.TOKEN_FUNC){
+
+                }else if(token == SkTokenType.TOKEN_FOR){
+
+                }else if(token == SkTokenType.TOKEN_BREAK){
+                    return new SkAST("OP_BREAK");
+                }else if(token == SkTokenType.TOKEN_CONTINUE){
+                    return new SkAST("OP_CONTINUE");
+                }
+                return null;
+            }
+
+            public SkAST nextNameChecker(SkAST variable){
+                while(true){
+                    if(matchToken(SkTokenType.TOKEN_DOT)){
+                        variable = SkAST.upInsert(variable, "OP_DOT", 2);
+                        SkToken token = getNextToken(false);
+                        if(token.tokenType == SkTokenType.TOKEN_ID){
+                            tokens.Dequeue();
+                            variable.RightNode = new SkAST(token.tokenContent);
+                        }else{
+                            throw new SharkSyntaxError($"expect variable name after \".\" at line {token.line}");
+                        }
+                    }else{
+                        break;
+                    }
+                }
+                return variable;
+            }
+
+            public SkAST nextIf(){
+
+                List<SkAST> branches = new List<SkAST>();
+                while(true){
+                    SkAST branch = new SkAST("STRUCT_BRANCH", 2);
+                    branch.LeftNode = nextCondition();
+                    branch.RightNode = nextBody();
+                    branches.Add(branch);
+
+                    if(matchToken(SkTokenType.TOKEN_ELSE)){
+                        if(matchToken(SkTokenType.TOKEN_IF)){
+                            // else if 
+
+                            continue;
+                        }else{
+                            // else
+                            SkAST branchDefault = new SkAST("DEFAULT", 1);
+                            branchDefault.LeftNode = nextBody();
+                            branches.Add(branchDefault);
+                            break;
+                        }
+                    }else{
+                        break;
+                    }
+                }
+                
+                SkAST ifblock = new SkAST("STRUCT_IF", branches.Count);
+                for(int i = 0; i < branches.Count; i ++){
+                    ifblock.SetChildren(i, branches[i]);
+                }
+                return ifblock;
+            }
+
+            public SkAST nextWhile(){
+
+                SkAST whileBlock = new SkAST("STRUCT_WHILE", 2);
+                whileBlock.LeftNode = nextCondition();
+                whileBlock.RightNode = nextBody();
+                return whileBlock;
+            }
+
+            public SkAST nextCondition(){
+
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    SkAST cond = nextLogicBinOp();
+                    if(matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                        return cond;
+                    }
+                }
+                throw new SharkSyntaxError("条件表达式右侧应该有一个括号, 在第{}行");
+            }
+            public SkAST nextBody(){
+
+                if(matchToken(SkTokenType.TOKEN_LEFT_BARCE)){
+                    SkAST body;
+                    List<SkAST> statements = new List<SkAST>();
+                    while(true){
+                        if(matchToken(SkTokenType.TOKEN_RIGHT_BRACE)){
+                            break;
+                        }
+                        statements.Add(nextStatement());
+                    }
+                    body = new SkAST("BODY", statements.Count);
+                    for(int i = 0; i < statements.Count; i ++){
+                        body.SetChildren(i, statements[i]);
+                    }
+                    return body;
+                }
+                throw new SharkSyntaxError("代码块必须由 \"{\" 开始");
             }
         }
     }

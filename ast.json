@@ -1,45 +1,51 @@
 {
-  "title": "print(false).call(2 + 3)",
+  "title": "1 + 2 * 3 - 6 / 5 + 4 * 3",
   "data": {
-    "name": "call",
+    "name": "TOKEN_ADD",
     "children": [
       {
-        "name": "TOKEN_DOT",
+        "name": "TOKEN_SUB",
         "children": [
           {
-            "name": "call",
+            "name": "TOKEN_ADD",
             "children": [
               {
-                "name": "print"
+                "name": "1"
               },
               {
-                "name": "list",
+                "name": "TOKEN_MUL",
                 "children": [
                   {
-                    "name": "false"
+                    "name": "2"
+                  },
+                  {
+                    "name": "3"
                   }
                 ]
               }
             ]
           },
           {
-            "name": "call"
+            "name": "TOKEN_DIV",
+            "children": [
+              {
+                "name": "6"
+              },
+              {
+                "name": "5"
+              }
+            ]
           }
         ]
       },
       {
-        "name": "list",
+        "name": "TOKEN_MUL",
         "children": [
           {
-            "name": "TOKEN_ADD",
-            "children": [
-              {
-                "name": "2"
-              },
-              {
-                "name": "3"
-              }
-            ]
+            "name": "4"
+          },
+          {
+            "name": "3"
           }
         ]
       }
