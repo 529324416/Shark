@@ -53,11 +53,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
+      "projectUniqueName": "c:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
       "projectName": "Shark",
-      "projectPath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
+      "projectPath": "c:\\Users\\MECHREVO\\Desktop\\Shark\\Shark.csproj",
       "packagesPath": "C:\\Users\\MECHREVO\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\obj\\",
+      "outputPath": "c:\\Users\\MECHREVO\\Desktop\\Shark\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\MECHREVO\\AppData\\Roaming\\NuGet\\NuGet.Config",

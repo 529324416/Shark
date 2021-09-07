@@ -7,6 +7,10 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <Reference Include="SharkTestLib">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>C:\Users\MECHREVO\Desktop\Shark\bin\Debug\net5.0\SharkTestLib.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

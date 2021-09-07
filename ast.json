@@ -1,54 +1,6 @@
 {
-  "title": "1 + 2 * 3 - 6 / 5 + 4 * 3",
+  "title": "x = 10\r\nprint(x/3)",
   "data": {
-    "name": "TOKEN_ADD",
-    "children": [
-      {
-        "name": "TOKEN_SUB",
-        "children": [
-          {
-            "name": "TOKEN_ADD",
-            "children": [
-              {
-                "name": "1"
-              },
-              {
-                "name": "TOKEN_MUL",
-                "children": [
-                  {
-                    "name": "2"
-                  },
-                  {
-                    "name": "3"
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "name": "TOKEN_DIV",
-            "children": [
-              {
-                "name": "6"
-              },
-              {
-                "name": "5"
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "name": "TOKEN_MUL",
-        "children": [
-          {
-            "name": "4"
-          },
-          {
-            "name": "3"
-          }
-        ]
-      }
-    ]
+    "name": "x"
   }
 }

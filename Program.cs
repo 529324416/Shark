@@ -3,27 +3,52 @@ using System.IO;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Diagnostics;
+
+using Newtonsoft.Json.Linq;
+
+using SharkTestLib;
+
 using Shark.SharkLexer;
 using Shark.SharkParser;
-using Newtonsoft.Json.Linq;
+using Shark.SharkVirtualMachine;
 
 namespace Shark
 {
+
     class Program
     {
         static void Main(string[] args)
         {
-            TEST_Parser("./test.sk");
-            Console.WriteLine(10.ToString());
+            // TEST_Parser("./test.sk");
+            SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.sk"));
+            SkParser parser = new SkParser();
+            parser.loadLexerSouce(lexer);
+            parser.nextAddSub();
+            
+            SharkScript script = parser.generateScript();
+            SharkVM vm = new SharkVM();
+            vm.RunScript(script);
+            Console.WriteLine(vm.stack.Pop());
+
+            Console.Write("program is done, press anykey to quit>");
+            Console.ReadLine();
         }
         static void TEST_Lexer(string filepath){
 
             string source = SharkUtils.ReadFile(filepath);
             SkLexer lexer = new SkLexer();
-            Queue<SkToken> queue = lexer.Parse(source);
+            Queue<SharkToken> queue = lexer.Parse(source);
             
             while(queue.Count > 0){
                 Console.WriteLine(queue.Dequeue());
+            }
+            Console.WriteLine("符号表:");
+            for(int i = 0;i < lexer.SymbolTable.Count; i ++){
+                Console.WriteLine(lexer.SymbolTable[i]);
+            }
+            Console.WriteLine("常量表:");
+            for(int i = 0;i < lexer.constTable.Count; i ++){
+                Console.WriteLine(lexer.constTable[i]);
             }
         }
         static void TEST_Parser(string filepath){
@@ -31,7 +56,7 @@ namespace Shark
             string source = SharkUtils.ReadFile(filepath);
             SkLexer lexer = new SkLexer(source);
             DEBUG_SkParser parser = new DEBUG_SkParser();
-            parser.LoadTokens(lexer.Parse());
+            // parser.LoadTokens(lexer.Parse());
             SkAST ast = parser.nextMathBinOp_Low();
 
             SaveAsJson(ast, source);
