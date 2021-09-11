@@ -11,6 +11,7 @@ using SharkTestLib;
 using Shark.SharkLexer;
 using Shark.SharkParser;
 using Shark.SharkVirtualMachine;
+using Shark.SharkCore;
 
 namespace Shark
 {
@@ -19,19 +20,38 @@ namespace Shark
     {
         static void Main(string[] args)
         {
-            // TEST_Parser("./test.sk");
-            SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.sk"));
+            // 执行中间代码
+            SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.js"));
             SkParser parser = new SkParser();
             parser.loadLexerSouce(lexer);
-            parser.nextAddSub();
+            while(parser.hasMore){
+                parser.nextStatement();
+                Console.WriteLine("test");
+            }
             
+            Console.WriteLine("--- 中间代码 ---");
+            parser.emitter.showBuffer();
+        
+
+            Console.WriteLine("--- 执行结果 ---");
             SharkScript script = parser.generateScript();
             SharkVM vm = new SharkVM();
-            vm.RunScript(script);
-            Console.WriteLine(vm.stack.Pop());
+            // vm.RunScript(script);
 
-            Console.Write("program is done, press anykey to quit>");
-            Console.ReadLine();
+            // Console.WriteLine(script.getVariable(2));
+            //Console.WriteLine(vm.stack.Pop());
+            // 执行中间代码结束
+
+
+            // 其他测试
+            // SkTable a = new SkTable();
+            // a.Setter(new SkInt(), "b");
+            // SkObject b = a.Getter("b");
+            // ((SkInt)b).data = 11;
+
+            // Console.WriteLine(((SkInt)a.Getter("b")).data);
+            // 其他测试结束
+
         }
         static void TEST_Lexer(string filepath){
 

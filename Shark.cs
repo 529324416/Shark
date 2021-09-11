@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -7,11 +8,34 @@ using System.Runtime.InteropServices;
 using Shark.SharkVirtualMachine;
 using Shark.SharkLexer;
 using Shark.SharkCore;
+using Shark.SharkLib;
 
 namespace Shark{
 
+    public enum SharkErrorType{
+
+        // 语法异常
+        SYNTAX_EXPECT_RIGHT_PAREN,                  // ) 缺失
+        SYNTAX_EXPECT_RIGHT_BRACKETS,               // ] 缺失
+        
+        // 操作异常
+        OPERATION_INDEX_OUTOF_RANGE,                // 数组范围超出
+
+        // 其他异常
+    }
+    public delegate void RaiseError(int line);
+
     public class SharkError: Exception{
         public SharkError(string errInfo):base(errInfo){}
+
+        public static Dictionary<SharkErrorType, RaiseError> errors;
+        public static void Initialize(){
+
+            errors = new Dictionary<SharkErrorType, RaiseError>();
+        }
+        public static void SYNTAX_EXPECT_RIGHT_PAREN(int line){
+            throw new SharkSyntaxError($"expect \")\" at line {line.ToString()}");
+        }
     }
     public class SharkSyntaxError: SharkError{
         public SharkSyntaxError(string errInfo):base(errInfo){}
@@ -24,6 +48,18 @@ namespace Shark{
     public class SharkOperationError: SharkError{
         public SharkOperationError(string errInfo):base(errInfo){}
         public override string Message => $"SharkOperationError: {base.Message}";
+    }
+    public class SharkIndexOutOfArrayError: SharkError{
+        public SharkIndexOutOfArrayError(string errInfo):base(errInfo){}
+        public override string Message => $"SharkIndexOutOfArrayError: {base.Message}";
+    }
+    public class SharkArgumentError:SharkError{
+        public SharkArgumentError(string errInfo):base(errInfo){}
+        public override string Message => $"SharkArgumentError: {base.Message}";
+    }
+    public class SharkTypeError:SharkError{
+        public SharkTypeError(string errInfo):base(errInfo){}
+        public override string Message => $"SharkTypeError: {base.Message}";
     }
 
     public static class SharkUtils{
@@ -194,12 +230,18 @@ namespace Shark{
 
             public readonly SkObject constant;       // 常量具体的值
             public int constID;
-            public SharkTokenConstant(Dictionary<int, SkObject> constTable, SkObject con, int lineNo, string content, SkTokenType type):
+            public SharkTokenConstant(List<SkObject> constTable, SkObject con, int lineNo, string content, SkTokenType type):
             base(lineNo, content, type, TokenModel.MODEL_TOKEN_IS_CONSTANT){
 
                 constant = con;
                 constID = constTable.Count;
-                constTable.Add(constID, con);
+                for(int i = 0; i < constTable.Count; i ++){
+                    if(SharkAPI.ConstantEquals(constTable[i], con)){
+                        constID = i;
+                        break; 
+                    }
+                }
+                constTable.Add(con);
             }
             public override string ToString()
             {
@@ -216,8 +258,7 @@ namespace Shark{
                 variableName = content;
                 variableID = ID;
             }
-            public override string ToString()
-            {
+            public override string ToString(){
                 return $"{base.ToString()} at line {line.ToString()}";
             }
         }
@@ -344,9 +385,10 @@ namespace Shark{
         /// </summary>
         public class SkLexer{
 
-            public Dictionary<int, SkObject> constTable;
+            public List<SkObject> constTable;
             public Dictionary<int, string> SymbolTable;
             public Dictionary<string, int> ReverseSymbolTable;
+            public Dictionary<int, SkObject> variableTable;
 
             private string sourceCode;
             private char[] sourceCodeCharList;
@@ -404,13 +446,13 @@ namespace Shark{
                 }
                 if(content == "null"){
 
-                    return new SharkTokenConstant(constTable, SkObject.SkNull, lineNo, content, SkTokenType.TOKEN_NULL);
+                    return new SharkTokenConstant(constTable, SkNull.NULL, lineNo, content, SkTokenType.TOKEN_NULL);
                 }else if(content == "true"){
 
-                    return new SharkTokenConstant(constTable, SkBool.SkTRUE, lineNo, content, SkTokenType.TOKEN_TRUE);
+                    return new SharkTokenConstant(constTable, SkBool.TRUE, lineNo, content, SkTokenType.TOKEN_TRUE);
                 }else if(content == "false"){
 
-                    return new SharkTokenConstant(constTable, SkBool.SkFALSE, lineNo, content, SkTokenType.TOKEN_FALSE);
+                    return new SharkTokenConstant(constTable, SkBool.FALSE, lineNo, content, SkTokenType.TOKEN_FALSE);
                 }else{
                     if(ReverseSymbolTable.ContainsKey(content)){
                         //如果符号表中已经存在目标符号了
@@ -426,17 +468,23 @@ namespace Shark{
             }
 
             public SkLexer(){
-                ReverseSymbolTable = new Dictionary<string, int>();
-                SymbolTable = new Dictionary<int, string>();
-                constTable = new Dictionary<int, SkObject>();
+                Initialize();
             }
             public SkLexer(string sourceCode){
                 LoadSourceCode(sourceCode);
+                Initialize();
+            }
+            public void Initialize(){
+
                 ReverseSymbolTable = new Dictionary<string, int>();
                 SymbolTable = new Dictionary<int, string>();
-                constTable = new Dictionary<int, SkObject>();
-            }
+                constTable = new List<SkObject>();
 
+                foreach(SkPack pack in SharkCommonLib.commonLib){
+                    ReverseSymbolTable.Add(pack.symbol, pack.id);
+                    SymbolTable.Add(pack.id, pack.symbol);
+                }
+            }
             
 
             ///<summary>
@@ -486,13 +534,27 @@ namespace Shark{
                 return output;
             }
             public SharkScript generateScript(){
-                return new SharkScript(SymbolTable, constTable);
+                Dictionary<int, SkObject> conTable = new Dictionary<int, SkObject>();
+                for(int i = 0; i < constTable.Count; i ++){
+                    conTable.Add(i, constTable[i]);
+                }
+                return new SharkScript(SymbolTable, conTable);
             }
             private SharkToken makeToken(SkTokenType type){
                 return new SharkTokenUniversal(currentLine, null, type);
             }
             private SharkToken makeToken(SkTokenType type, string content){
                 return new SharkTokenUniversal(currentLine, content, type);
+            }
+            private SharkToken makeIntToken(SkTokenType type, string content){
+
+                SkInt con = new SkInt(int.Parse(content));
+                return new SharkTokenConstant(constTable, con, currentLine, content, type);
+            }
+            public SharkToken makeFloatToken(SkTokenType type, string content){
+
+                SkFloat con = new SkFloat(float.Parse(content));
+                return new SharkTokenConstant(constTable, con, currentLine, content, type);
             }
             ///<summary>
             ///从源代码的指定位置获取一个子字符串
@@ -605,13 +667,13 @@ namespace Shark{
 
                     case '0':
                     if(matchChar('x')){
-                        return makeToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isHexChar, "invalid hex number"));
+                        return makeIntToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isHexChar, "invalid hex number"));
                     }else if(matchChar('o')){
-                        return makeToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isOctChar, "invalid oct number"));
+                        return makeIntToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isOctChar, "invalid oct number"));
                     }else if(matchChar('b')){
-                        return makeToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isBinChar, "invalid bin number"));
+                        return makeIntToken(SkTokenType.TOKEN_INT, parseSpecNumber(SharkLexerCore.isBinChar, "invalid bin number"));
                     }else{
-                        return makeToken(SkTokenType.TOKEN_INT, C.ToString());
+                        return makeIntToken(SkTokenType.TOKEN_INT, C.ToString());
                     }
 
                     default:
@@ -1379,27 +1441,32 @@ namespace Shark{
 
             public SharkToken[] tokens;
             public int currentPos;
+            public int lastPos;
             public int currentLine;
+            public StringBuilder currentStatementInfo;
 
             public SkParser(){
 
                 emitter = new SharkCodeEmitter();
                 currentPos = 0;
+                lastPos = 0;
                 currentLine = 1;
-            }
-            public SharkScript generateScript(){
-
-                SharkILStream ilstream = emitter.EmitDone();
-                currentScript.loadCommands(ilstream);
-                return currentScript;
+                currentStatementInfo = new StringBuilder();
             }
 
             public SharkToken currentToken{
                 get => tokens[currentPos];
             }
+            public SharkToken lastToken{
+                get => tokens[lastPos];
+            }
+            public bool hasMore{
+                get => currentPos < tokens.Length;
+            }
 
             public void moveToNext(){
 
+                lastPos = currentPos;
                 currentPos ++;
                 if(currentToken.tokenModel != TokenModel.MODEL_TOKEN_IS_SYSTEMWORDS){
                     currentLine = ((SharkTokenUniversal)currentToken).line;
@@ -1412,6 +1479,12 @@ namespace Shark{
                     return true;
                 }
                 return false;
+            }
+            public SharkScript generateScript(){
+
+                SharkILStream ilstream = emitter.EmitDone();
+                currentScript.loadCommands(ilstream);
+                return currentScript;
             }
 
             /// <summary>
@@ -1437,25 +1510,113 @@ namespace Shark{
                 switch(token.tokenType){
 
                     case SkTokenType.TOKEN_INT:
-                    emitter.pushConst(((SharkTokenConstant)token).constID);
+                    emitter.pushConst(((SharkTokenConstant)token).constID, currentLine);
+                    moveToNext();
                     break;
 
                     case SkTokenType.TOKEN_FLOAT:
-                    emitter.pushConst(((SharkTokenConstant)token).constID);
+                    emitter.pushConst(((SharkTokenConstant)token).constID, currentLine);
+                    moveToNext();
                     break;
 
                     case SkTokenType.TOKEN_FALSE:
-                    emitter.pushFalse();
+                    emitter.pushFalse(currentLine);
+                    moveToNext();
+                    break;
+
+                    case SkTokenType.TOKEN_TRUE:
+                    emitter.pushTrue(currentLine);
+                    moveToNext();
+                    break;
+
+                    case SkTokenType.TOKEN_STRING:
+                    emitter.pushConst(((SharkTokenConstant)token).constID, currentLine);
+                    moveToNext();
+                    break;
+
+                    case SkTokenType.TOKEN_ID:
+                    int id = ((SharkTokenVariable)token).variableID;
+                    moveToNext();
+                    nextIDFactor(id);
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_BRACKETS:
+                    moveToNext();
+                    nextList();
                     break;
                 }
-                moveToNext();
             }
+
+            /// <summary>
+            /// 当在因子检测器中遇到了], 获取完整的列表
+            /// </summary>
+            public void nextList(){
+
+            }
+
+            /// <summary>
+            /// 当在因子检测器中遇到了ID, 检查ID是索引还是函数调用还是Getter
+            /// </summary>
+            public void nextIDFactor(int id){
+
+                emitter.pushVar(id, currentLine);// 将是函数的目标对象压入栈区
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    // 函数调用
+
+                    emitter.pushCall(nextParamlist(), currentLine);
+                    nextIDFactor();
+                }else if(matchToken(SkTokenType.TOKEN_DOT)){
+                    // getter
+
+                    if(matchToken(SkTokenType.TOKEN_ID)){
+                        //TODO 处理DOT操作
+                    }else{
+                        throw new SharkSyntaxError($"expect variable name after \".\" at line {currentLine.ToString()}");
+                    }
+                    nextIDFactor();
+                }else if(matchToken(SkTokenType.TOKEN_LEFT_BRACKETS)){
+                    // 索引
+
+                    nextLogicExpr();
+                    if(!matchToken(SkTokenType.TOKEN_LEFT_BRACKETS)){
+                        throw new SharkSyntaxError("expect \"]\" after list index operation at line {}");
+                    }
+                    nextIDFactor();
+                }
+            }
+            public void nextIDFactor(){
+
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    // 函数调用
+
+                    emitter.pushCall(nextParamlist(), currentLine);
+                    nextIDFactor();
+                }else if(matchToken(SkTokenType.TOKEN_DOT)){
+                    // getter
+
+                    if(matchToken(SkTokenType.TOKEN_ID)){
+                        //TODO 处理DOT操作
+                    }else{
+                        throw new SharkSyntaxError($"expect variable name after \".\" at line {currentLine.ToString()}");
+                    }
+                    nextIDFactor();
+                }else if(matchToken(SkTokenType.TOKEN_LEFT_BRACKETS)){
+                    // 索引
+
+                    nextLogicExpr();
+                    if(!matchToken(SkTokenType.TOKEN_LEFT_BRACKETS)){
+                        throw new SharkSyntaxError("expect \"]\" after list index operation at line {}");
+                    }
+                    nextIDFactor();
+                }
+            }
+            
 
             public void nextNegative(){
 
                 if(matchToken(SkTokenType.TOKEN_SUB)){
                     nextFactor();
-                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_NEG);
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_NEG, currentLine);
                 }else{
                     nextFactor();
                 }
@@ -1463,27 +1624,307 @@ namespace Shark{
             public void nextMulDiv(){
 
                 nextNegative();
-                if(matchToken(SkTokenType.TOKEN_MUL)){
+                while(true){
+                    if(matchToken(SkTokenType.TOKEN_MUL)){
 
-                    nextNegative();
-                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_MUL);
-                }else if(matchToken(SkTokenType.TOKEN_DIV)){
+                        nextNegative();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_MUL, currentLine);
+                    }else if(matchToken(SkTokenType.TOKEN_DIV)){
 
-                    nextNegative();
-                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_DIV);
+                        nextNegative();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_DIV, currentLine);
+                    }else if(matchToken(SkTokenType.TOKEN_MOD)){
+
+                        nextNegative();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_MOD, currentLine);
+                    }else{
+                        break;
+                    }
                 }
             }
-            public void nextAddSub(){
+            public void nextMathExpr(){
 
                 nextMulDiv();
-                if(matchToken(SkTokenType.TOKEN_ADD)){
+                while(true){
+                    if(matchToken(SkTokenType.TOKEN_ADD)){
+                        nextMulDiv();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_ADD, currentLine);
+                    }else if(matchToken(SkTokenType.TOKEN_SUB)){
+                        nextMulDiv();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_SUB, currentLine);
+                    }else{
+                        break;
+                    }
+                }
+            }
+            public void nextCompareExpr(){
 
-                    nextMulDiv();
-                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_ADD);
-                }else if(matchToken(SkTokenType.TOKEN_SUB)){
+                nextMathExpr();
+                if(matchToken(SkTokenType.TOKEN_GREATER)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_GT, currentLine);
+                }else if(matchToken(SkTokenType.TOKEN_GREATER_EQUAL)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_GE, currentLine);
+                }else if(matchToken(SkTokenType.TOKEN_LESS)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_LT, currentLine);
+                }else if(matchToken(SkTokenType.TOKEN_LESS_EQUAL)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_LE, currentLine);
+                }else if(matchToken(SkTokenType.TOKEN_NOT_EQUAL)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_NE, currentLine);
+                }else if(matchToken(SkTokenType.TOKEN_EQUAL)){
+
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_EQ, currentLine);
+                }
+            }
+            public void nextLogicNot(){
+
+                nextCompareExpr();
+                if(matchToken(SkTokenType.TOKEN_LOGIC_NOT)){
+
+                    nextCompareExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_NOT, currentLine);
+                }
+            }
+            public void nextLogicExpr(){
+
+                nextCompareExpr();
+                while(true){
+                    if(matchToken(SkTokenType.TOKEN_LOGIC_AND)){
+
+                        nextCompareExpr();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_AND, currentLine);
+                    }else if(matchToken(SkTokenType.TOKEN_LOGIC_OR)){
+
+                        nextCompareExpr();
+                        emitter.pushOperatorNoParam(SharkOpcodeType.OP_OR, currentLine);
+                    }else{
+                        break;
+                    }
+                }
+            }
+
+
+            // /// <summary>
+            // /// 当出现一个ID时，进行相关的后缀检测
+            // /// </summary>
+            // public void nextIDTrack(){
+
+            //     if(matchToken(SkTokenType.TOKEN_DOT)){
+            //         if(matchToken(SkTokenType.TOKEN_ID)){
+            //             emitter.pushGetter(((SharkTokenVariable)lastToken).variableID, currentLine);
+            //         }
+            //         throw new SharkSyntaxError($"expect a variable name after \".\" at line {currentLine.ToString()}");
+            //     }else if(matchToken(SkTokenType.TOKEN_LEFT_BRACKETS)){
                     
-                    nextMulDiv();
-                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_SUB);
+            //     }
+            // }
+
+            /// <summary>
+            /// 当语句开头出现一个ID时，检查ID的意义
+            /// </summary>
+            public void nextStatementID(int id){
+                
+                switch(currentToken.tokenType){
+
+                    case SkTokenType.TOKEN_ASSIGN:
+                    moveToNext();
+                    nextLogicExpr();
+                    emitter.pushOperator32Bit(SharkOpcodeType.OP_SET_LOCAL, id, currentLine);
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_ADD:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_SUB:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_MUL:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_DIV:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_MOD:
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_PAREN:      //函数调用
+                    emitter.pushVar(id, currentLine);
+                    moveToNext();
+                    emitter.pushOperator32Bit(SharkOpcodeType.JCALL, nextParamlist(), currentLine);
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_BRACKETS:   // 索引
+                    break;
+
+                    case SkTokenType.TOKEN_DOT:             // GETTER
+                    emitter.pushVar(id, currentLine);
+                    moveToNext();
+                    // 略过.
+
+                    if(currentToken.tokenType == SkTokenType.TOKEN_ID){
+                        emitter.pushOperator32Bit(SharkOpcodeType.OP_GET_FIELD, ((SharkTokenVariable)currentToken).variableID, currentLine);
+                        moveToNext();
+                        nextStatementID();
+                    }else{
+                        throw new SharkSyntaxError($"expect variable name after \"{currentStatementInfo.ToString()}\" at line {currentLine.ToString()}");
+                    }
+                    
+                    break;
+
+                }
+            }
+
+            public void nextStatementID(){
+                
+                switch(currentToken.tokenType){
+
+                    case SkTokenType.TOKEN_ASSIGN:
+                    moveToNext();
+                    nextLogicExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_SET_FIELD, currentLine);
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_ADD:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_SUB:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_MUL:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_DIV:
+                    break;
+
+                    case SkTokenType.TOKEN_ASSIGN_MOD:
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_PAREN:      //函数调用
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_BRACKETS:   // 索引
+                    break;
+
+                    case SkTokenType.TOKEN_DOT:             // GETTER
+                    moveToNext();
+                    // 略过.
+
+                    if(currentToken.tokenType == SkTokenType.TOKEN_ID){
+                        emitter.pushOperator32Bit(SharkOpcodeType.OP_GET_FIELD, ((SharkTokenVariable)currentToken).variableID, currentLine);
+                        moveToNext();
+                        nextStatementID();
+                    }else{
+                        throw new SharkSyntaxError($"expect variable name after \"{currentStatementInfo.ToString()}\" at line {currentLine.ToString()}");
+                    }
+                    break;
+
+                }
+            }
+
+
+            /// <summary>
+            /// 将所有的参数压入栈区
+            /// </summary>
+            public int nextParamlist(){
+
+                int count = 0;
+                while(true){
+                    if(count > 0){
+                        if(matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                            break;
+                        }else if(matchToken(SkTokenType.TOKEN_COMMA)){
+                            continue;
+                        }else{
+                            nextLogicExpr();
+                            count ++;
+                        }
+                    }else{
+                        if(matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                            break;
+                        }else{
+                            nextLogicExpr();
+                            count ++;
+                        }
+                    }
+                }
+                return count;
+            }
+
+            public void nextIf(){
+                nextCondition();
+                int length = nextBody();
+                emitter.insertCode32Bit(emitter.record, SharkOpcodeType.JMP_FALSE, length, currentLine);
+            }
+            public void nextWhile(){
+
+                int position = emitter.BufferSize;
+                nextCondition();
+                int length = nextBody() + 1;
+                emitter.insertCode32Bit(emitter.record, SharkOpcodeType.JMP_FALSE, length, currentLine);
+                emitter.pushOperator32Bit(SharkOpcodeType.JMP, position, currentLine);
+            }
+            public void nextCondition(){
+
+                // 检查左括号
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    nextLogicExpr();
+
+                    // 检查右括号
+                    if(!matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                        throw new SharkSyntaxError($"expect \")\" end of condition expr at line {currentLine.ToString()}");
+                    }
+                }else{
+                    throw new SharkSyntaxError($"condition expresion should start with \"(\" at line {currentLine.ToString()}");
+                }
+            }
+
+            /// <summary>
+            /// 找到下一个完整的代码块
+            /// </summary>
+            public int nextBody(){
+
+                if(matchToken(SkTokenType.TOKEN_LEFT_BARCE)){
+                    emitter.Record();
+                    while(true){
+                        if(matchToken(SkTokenType.TOKEN_RIGHT_BRACE)){
+                            break;
+                        }
+                        nextStatement();
+                    }
+                    return emitter.RecordDone();
+                }
+                throw new SharkSyntaxError($"code block should start with \"{{\" at line {currentLine.ToString()}");
+            }
+
+            /// <summary>
+            /// 下一条完整的语句
+            /// </summary>
+            public void nextStatement(){
+
+                currentStatementInfo.Clear();
+                if(matchToken(SkTokenType.TOKEN_ID)){
+                    // start with a id
+
+                    SharkTokenVariable variable = (SharkTokenVariable)lastToken;
+                    currentStatementInfo.Append((variable.variableName));
+                    nextStatementID(variable.variableID);
+                }else if(matchToken(SkTokenType.TOKEN_IF)){
+                    // 条件判断
+
+                    nextIf();
+                }else if(matchToken(SkTokenType.TOKEN_WHILE)){
+
+                    nextWhile();
                 }
             }
         }
@@ -1501,7 +1942,6 @@ namespace Shark{
             OP_PUSH_FALSE,         // 向堆栈中压入一个FALSE             
             OP_PUSH_TRUE,          // 向堆栈中压入一个TRUE
 
-            // 从堆栈中取出两个值进行运算
             OP_ADD,                
             OP_SUB,
             OP_MUL,
@@ -1520,23 +1960,33 @@ namespace Shark{
             OP_AND,
             OP_OR,
 
-            // 从堆栈中取出一个值进行运算
             OP_NOT,
             OP_NEG,
             OP_BIT_NOT,
+
+            OP_SET_FIELD,
+            OP_END,
 
             // 型号2, PARAM_32BIT
             OP_PUSH_VAR,           // 向堆栈中压入一个变量
             OP_PUSH_CONST,         // 向堆栈中压入一个常量
             OP_PUSH_INT,           // 向堆栈中压入一个整型值
-            OP_LOAD_VAR,           // 从堆栈顶端弹出一个变量并存入目标变量
             OP_PUSH_FLOAT,         // 向堆栈中压入一个单精度值
+            OP_SET_LOCAL,          /* 从堆栈中取出一个值，然后将其赋值给全局表中指定的对象 */
+            OP_GET_FIELD,          /* 从堆栈中取出一个对象，并从中访问一个指定的字段，再次压入堆栈中 */
+            OP_INDEX,
+            CALL,
+            JCALL,                  // 调用的函数结果并不会压住堆栈中
+            
+
+            JMP_FALSE,           // 从栈区中取出一个单位，如果检查为false，则跳过指定数量的操作码
+            JMP,
 
 
             // 型号3, PARAM_64BIT
             OP_PUSH_LONG,          // 向堆栈中压入一个长整型值
             OP_PUSH_DOUBLE,        // 向堆栈中压入一个双精度值
-            
+
         }
 
         public enum SharkOpcodeModel{
@@ -1572,12 +2022,16 @@ namespace Shark{
         /// Shark中间代码, 运行时形态, 从二进制文件中释放成该数据类型
         /// </summary>
         public abstract class SharkInternalCodeBase{
+
+            public readonly string contextInfo;
+            public readonly int line;
             public readonly SharkOpcodeType opType;
             public readonly SharkOpcodeModel opModel;
-            public SharkInternalCodeBase(SharkOpcodeType type, SharkOpcodeModel model){
+            public SharkInternalCodeBase(SharkOpcodeType type, SharkOpcodeModel model, int lineNo){
                 
                 opType = type;
                 opModel = model;
+                line = lineNo;
             }
             public override string ToString()
             {
@@ -1585,7 +2039,7 @@ namespace Shark{
             }
         }
         public class SharkInternalCodeNoParam: SharkInternalCodeBase{
-            public SharkInternalCodeNoParam(SharkOpcodeType type):base(type, SharkOpcodeModel.MODEL_NO_PARAM){}
+            public SharkInternalCodeNoParam(SharkOpcodeType type, int line):base(type, SharkOpcodeModel.MODEL_NO_PARAM, line){}
             public override string ToString()
             {
                 return base.ToString();
@@ -1599,13 +2053,13 @@ namespace Shark{
             public float FloatValue{
                 get => __data.value_float;
             }
-            public SharkInternalCode_1_32BIT(SharkOpcodeType type, int constID):
-            base(type, SharkOpcodeModel.MODEL_PARAM_1_32BIT){
+            public SharkInternalCode_1_32BIT(SharkOpcodeType type, int constID, int line):
+            base(type, SharkOpcodeModel.MODEL_PARAM_1_32BIT, line){
                 __data = new DATA_1_32BIT();
                 __data.value_int = constID;
             }
-            public SharkInternalCode_1_32BIT(SharkOpcodeType type, float value):
-            base(type, SharkOpcodeModel.MODEL_PARAM_1_32BIT){
+            public SharkInternalCode_1_32BIT(SharkOpcodeType type, float value, int line):
+            base(type, SharkOpcodeModel.MODEL_PARAM_1_32BIT, line){
                 __data= new DATA_1_32BIT();
                 __data.value_float = value;
             }
@@ -1644,12 +2098,22 @@ namespace Shark{
         }
 
         public class SharkCodeEmitter{
+            public int BufferSize{
+                get => buffer.Count;
+            }
+            public int record;
             public List<SharkInternalCodeBase> buffer;
 
             public void showBuffer(){
                 foreach(SharkInternalCodeBase code in buffer){
                     Console.WriteLine(code);
                 }
+            }
+            public void Record(){
+                record = BufferSize;
+            }
+            public int RecordDone(){
+                return BufferSize - record;
             }
 
             public SharkCodeEmitter(){
@@ -1668,96 +2132,134 @@ namespace Shark{
                 buffer.Clear();
                 return iLStream;
             }
-            public void pushConst(int constID){
-                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_PUSH_CONST, constID));
+            public void insertCodeNoParam(int pos, SharkOpcodeType type, int line){
+                buffer.Insert(pos, new SharkInternalCodeNoParam(type, line));
             }
-            public void pushVar(int varID){
-                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_PUSH_VAR, varID));
+            public void insertCode32Bit(int pos, SharkOpcodeType type, int value, int line){
+                buffer.Insert(pos, new SharkInternalCode_1_32BIT(type, value, line));
             }
-            public void pushFalse(){
-                buffer.Add(new SharkInternalCodeNoParam(SharkOpcodeType.OP_PUSH_FALSE));
+            public void pushConst(int constID, int line){
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_PUSH_CONST, constID, line));
             }
-            public void pushTrue(){
-                buffer.Add(new SharkInternalCodeNoParam(SharkOpcodeType.OP_PUSH_TRUE));
+            public void pushVar(int varID, int line){
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_PUSH_VAR, varID, line));
             }
-            public void pushOperatorNoParam(SharkOpcodeType type){
-                buffer.Add(new SharkInternalCodeNoParam(type));
+            public void pushFalse(int line){
+                buffer.Add(new SharkInternalCodeNoParam(SharkOpcodeType.OP_PUSH_FALSE, line));
             }
-        }
-        
-        public class SharkRunableHeader{
-            // 可执行单元头
-
-            private SharkScript globalRunable;
-            private SharkRunable parent;
-            public SharkRunableHeader(SharkRunable parent, SharkScript globalRunable){
-
-                this.parent = parent;
-                this.globalRunable = globalRunable;
+            public void pushTrue(int line){
+                buffer.Add(new SharkInternalCodeNoParam(SharkOpcodeType.OP_PUSH_TRUE, line));
             }
-            public string __get_symbol(int id){
-                return globalRunable.__get_symbol(id);
+            public void pushOperatorNoParam(SharkOpcodeType type, int line){
+                buffer.Add(new SharkInternalCodeNoParam(type, line));
             }
-            public SkObject  __get_variable(int id){
-
-                if(parent != null){
-                    return parent.getVariable(id);
-                }
-                throw new SharkNameError($"name {__get_symbol(id)} is undefined");
+            public void pushOperator32Bit(SharkOpcodeType type, int value, int line){
+                buffer.Add(new SharkInternalCode_1_32BIT(type, value, line));
+            }
+            public void pushGetField(int id, int line){
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_GET_FIELD, id, line));
+            }
+            public void pushCall(int count, int line){
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.CALL, count, line));
             }
         }
 
-        public class SharkRunable{
+        public interface SharkRunable{
 
-            protected SharkILStream codes;
-            protected SharkRunableHeader header;
-            protected Dictionary<int, SkObject> THIS;
-            private int pointer;
-            public SharkInternalCodeBase currentCode{
-                get => codes.getOpcode(pointer);
-            }
-            public bool hasProgramDone{
-                get => pointer >= codes.Size;
-            }
-            public void moveToNext(){
-                pointer ++;
-            }
-
-            public SharkRunable(){
-                THIS = new Dictionary<int, SkObject>();
-            }
-            public void setHeader(SharkRunableHeader header){
-                this.header = header;
-            }
-            public void loadCommands(SharkILStream codes){
-                this.codes = codes;
-            }
-            public SkObject getVariable(int id){
-
-                if(THIS.ContainsKey(id)){
-                    return THIS[id];
-                }
-                return header.__get_variable(id);
-            }
-            public void setVariable(SkObject variable, int id){
-
-                THIS[id] = variable;
-            }
+            string getSymbol(int id);
+            SkObject getVariable(int id);
+            void setVariable(SkObject value, int id);
+            bool hasParent();
+            void loadCommands(SharkILStream stream);
+            bool shouldContinue();
+            SkObject run(SkTuple paramlist);
+            void run();
+            void bindVM(SharkVM vm);
+            int getCurrentLine();
+            void jumpTo(int position);
+            void jumpOffset(int length);
         }
+
         public class SharkScript : SharkRunable{
 
-            public Dictionary<int, SkObject> cons;
-            public Dictionary<int, string> symbols;
+            private SharkILStream codes;
+            private Dictionary<int, SkObject> thisTable;            // this表
+            private Dictionary<int, SkObject> cons;                 // 常量表
+            private Dictionary<int, string> symbols;                // 符号表
+
+            private int pointer;
+            private SharkVM interpreter;
+            private int line;
             public SharkScript(Dictionary<int, string> symbolTable, Dictionary<int, SkObject> constantTable):base(){
 
-                this.symbols = symbolTable;
-                this.cons = constantTable;
-            }
-            public string __get_symbol(int id){
-                return symbols[id];
+                symbols = symbolTable;
+                cons = constantTable;
+                thisTable = new Dictionary<int, SkObject>();
+                foreach(SkPack pack in SharkCommonLib.commonLib){
+                    thisTable.Add(pack.id, pack.value);
+                }
+                pointer = 0;
             }
             public SkObject __get_const(int id){
                 return cons[id];
+            }
+            public int getCurrentLine(){
+                return line;
+            }
+            public string getSymbol(int id){
+                return symbols[id];
+            }
+            public SkObject getVariable(int id){
+                if(thisTable.ContainsKey(id)){
+                    return thisTable[id];
+                }
+                return SkNull.NULL;
+            }
+            public void setVariable(SkObject value, int id){
+
+                if(thisTable.ContainsKey(id)){
+                    thisTable[id] = value;
+                }else{
+                    thisTable.Add(id, value);
+                }
+            }
+            public bool hasParent(){
+                return false;
+            }
+            public void loadCommands(SharkILStream stream){
+                this.codes = stream;
+            }
+            public bool shouldContinue(){
+                return pointer < codes.Size;
+            }
+            public SkObject run(SkTuple paramlist){
+                throw new SharkError("script cannot run as a funciton");
+            }
+            public void bindVM(SharkVM vm){
+                this.interpreter = vm;
+            }
+            public void run(){
+
+                while(shouldContinue()){
+                    SharkInternalCodeBase code = codes.getOpcode(pointer);
+                    switch(code.opModel){
+
+                        case SharkOpcodeModel.MODEL_NO_PARAM:
+                        interpreter.op_search_table_no_param[code.opType]();
+                        break;
+
+                        case SharkOpcodeModel.MODEL_PARAM_1_32BIT:
+                        interpreter.op_search_table_1_32bit[code.opType](((SharkInternalCode_1_32BIT)code).IntValue);
+                        break;
+                    }
+                    pointer ++;
+                }
+            }
+            public void jumpTo(int position){
+                pointer = position;
+            }
+            public void jumpOffset(int length){
+                pointer += length;
             }
         }
 
@@ -1767,6 +2269,10 @@ namespace Shark{
 
         public class SharkVM{
 
+            public static SharkVM vm;
+            public static int CurrentLine{
+                get => vm.currentLine;
+            }
             public Stack<SkObject> stack;
             public SharkScript currentScript;
             public SharkRunable currentRunable;
@@ -1775,66 +2281,181 @@ namespace Shark{
             public Dictionary<SharkOpcodeType, opfunc_1_32bit> op_search_table_1_32bit;
             public Dictionary<SharkOpcodeType, opfunc_1_64bit> op_search_table_1_64bit;
 
+            public int currentLine{
+                get => currentRunable.getCurrentLine();
+            }
+
             public SharkVM(){
 
+                vm = this;
                 stack = new Stack<SkObject>();
                 op_search_table_no_param = new Dictionary<SharkOpcodeType, opfunc_no_param>();
                 op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_FALSE, OP_PUSH_FALSE);
                 op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_TRUE, OP_PUSH_TRUE);
                 op_search_table_no_param.Add(SharkOpcodeType.OP_ADD, OP_ADD);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_SUB, OP_SUB);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_NEG, OP_NEG);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_MUL, OP_MUL);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_DIV, OP_DIV);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_MOD, OP_MOD);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_GT, OP_GT);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_GE, OP_GE);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_LE, OP_LE);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_LT, OP_LT);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_EQ, OP_EQ);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_NE, OP_NE);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_NOT, OP_NOT);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_AND, OP_AND);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_OR, OP_OR);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_SET_FIELD, OP_SET_FIELD);
                 
                 op_search_table_1_32bit = new Dictionary<SharkOpcodeType, opfunc_1_32bit>();
                 op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_VAR, OP_PUSH_VAR);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_LOAD_VAR, OP_LOAD_VAR);
                 op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_CONST, OP_PUSH_CONST);
+                op_search_table_1_32bit.Add(SharkOpcodeType.OP_SET_LOCAL, OP_SET_LOCAL);
+                op_search_table_1_32bit.Add(SharkOpcodeType.CALL, CALL);
+                op_search_table_1_32bit.Add(SharkOpcodeType.JCALL, JCALL);
+                op_search_table_1_32bit.Add(SharkOpcodeType.OP_INDEX, INDEX);
+                op_search_table_1_32bit.Add(SharkOpcodeType.JMP_FALSE, JUMP_FALSE);
+                op_search_table_1_32bit.Add(SharkOpcodeType.JMP, JUMP);
             }
 
             public void RunScript(SharkScript script){
 
                 currentScript = script;
                 currentRunable = script;
+                script.bindVM(this);
+                script.run();
+            }
+            public SkTuple loadParamlist(int count){
 
-                while(!currentRunable.hasProgramDone){
-                    SharkInternalCodeBase code = currentRunable.currentCode;
-                    switch(code.opModel){
-                        case SharkOpcodeModel.MODEL_NO_PARAM:
-                        op_search_table_no_param[code.opType]();
-                        break;
-
-                        case SharkOpcodeModel.MODEL_PARAM_1_32BIT:
-                        int value = ((SharkInternalCode_1_32BIT)code).IntValue;
-                        op_search_table_1_32bit[code.opType](value);
-                        break;
-                    }
-                    currentRunable.moveToNext();
+                SkTuple tuple = new SkTuple(count);
+                for(int i = 0; i < count; i ++){
+                    tuple.__set_index(i, stack.Pop());
                 }
+                return tuple;
             }
 
 
             public void OP_PUSH_TRUE(){
 
-                stack.Push(SkBool.SkTRUE);
+                stack.Push(SkBool.TRUE);
             }
             public void OP_PUSH_FALSE(){
 
-                stack.Push(SkBool.SkFALSE);
+                stack.Push(SkBool.FALSE);
             }
             public void OP_PUSH_CONST(int id){
 
-                stack.Push(currentScript.cons[id]);
+                stack.Push(currentScript.__get_const(id));
             }
             public void OP_PUSH_VAR(int id){
                 
                 stack.Push(currentRunable.getVariable(id));
             }
-            public void OP_LOAD_VAR(int id){
+            public void OP_ADD(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Add(stack.Pop(), tmp));
+            }
+            public void OP_SUB(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Sub(stack.Pop(), tmp));
+            }
+            public void OP_NEG(){
+                stack.Push(SharkAPI.Neg(stack.Pop()));
+            }
+            public void OP_MUL(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Mul(stack.Pop(), tmp));
+            }
+            public void OP_DIV(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Div(stack.Pop(), tmp));
+            }
+            public void OP_MOD(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Mod(stack.Pop(), tmp));
+            }
+            public void OP_GT(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Gt(stack.Pop(), tmp));
+            }
+            public void OP_GE(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Ge(stack.Pop(), tmp));
+            }
+            public void OP_LE(){
+
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Le(stack.Pop(), tmp));
+            }
+            public void OP_LT(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Lt(stack.Pop(), tmp));
+            }
+            public void OP_NE(){
+
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Ne(stack.Pop(), tmp));
+            }
+            public void OP_EQ(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Eq(stack.Pop(), tmp));
+            }
+            public void OP_AND(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.And(stack.Pop(), tmp));
+            }
+            public void OP_OR(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Or(stack.Pop(), tmp));
+            }
+            public void OP_NOT(){
+                SkObject tmp = stack.Pop();
+                stack.Push(SharkAPI.Not(stack.Pop()));
+            }
+            public void OP_PUSH_LOCAL(int id){
+
+                SkObject tmp = stack.Pop();
+                switch(tmp.BaseType){
+
+                    case SkObjectType.OT_TABLE:
+                    stack.Push(((SkTable)tmp).Getter(id));
+                    break;
+                }
+            }
+            public void OP_SET_LOCAL(int id){
 
                 currentRunable.setVariable(stack.Pop(), id);
             }
-            public void OP_ADD(){
+            public void OP_SET_FIELD(){
 
-                SkObject tmp = stack.Pop();
-                stack.Push(SharkAPI.Add(stack.Pop(), tmp));
+                SkObject value = stack.Pop();
+                stack.Pop().RewriteObject(value);
+            }
+            public void CALL(int count){
+
+                SkTuple paramlist = loadParamlist(count);
+                stack.Push(((SkCallable)stack.Pop()).call(paramlist));
+            }
+            public void JCALL(int count){
+
+                SkTuple paramlist = loadParamlist(count);
+                ((SkCallable)stack.Pop()).call(paramlist);
+            }
+            public void INDEX(int index){
+
+                stack.Push(SharkAPI.Index(stack.Pop(), index));
+            }
+            public void JUMP_FALSE(int length){
+
+                SkBool value = (SkBool)stack.Pop();
+                if(value == SkBool.FALSE){
+                    currentRunable.jumpOffset(length);
+                }
+            }
+            public void JUMP(int pos){
+                currentRunable.jumpOffset(pos);
             }
         }
 
@@ -1852,6 +2473,14 @@ namespace Shark{
     }
 
     namespace SharkCore{
+
+        public static class SharkCore{
+
+            public static SkNull NULL = new SkNull();
+            public static SkBool TRUE = new SkBool(1);
+            public static SkBool FALSE = new SkBool(0);
+            public static SkTuple emptyList = new SkTuple(0);
+        }
 
 
         public static class SharkCoreUtils{
@@ -1932,21 +2561,203 @@ namespace Shark{
 
         public static class SharkAPI{
 
+            public static SkBool And(SkBool left, SkBool right){
+                return SkBool.Bools[left.data * right.data];
+            }
+            public static SkBool Or(SkBool left, SkBool right){
+                return SkBool.Bools[Math.Min(1, left.data + right.data)];
+            }
+            public static SkBool Not(SkBool value){
+                return SkBool.Bools[1 - value.data];
+            }
             public static SkObject Add(SkObject left, SkObject right){
+                if(left.BaseType == right.BaseType){
+                    if(left.BaseType == SkObjectType.OT_VALUE){
+                        return ((SkValue)left).Add((SkValue)right);
+                    }else if(left.BaseType == SkObjectType.OT_STRING){
+                        return new SkString(((SkString)left).text + ((SkString)right).text);
+                    }
+                }
+                throw new SharkOperationError($"add operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Sub(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Sub((SkValue)right);
+                }
+                throw new SharkOperationError($"sub operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Neg(SkObject value){
+
+                if(value.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)value).Neg();
+                }
+                throw new SharkOperationError($"neg operation is unsupportted on type {value.BaseType}");
+            }
+            public static SkObject Mul(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Mul(((SkValue)right));
+                }
+                throw new SharkOperationError($"mul operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Div(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Div(((SkValue)right));
+                }
+                throw new SharkOperationError($"div operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Mod(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Mod(((SkValue)right));
+                }
+                throw new SharkOperationError($"mod operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Ge(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Ge(((SkValue)right));
+                }
+                throw new SharkOperationError($">= operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Gt(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Gt(((SkValue)right));
+                }
+                throw new SharkOperationError($"> operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Le(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Le(((SkValue)right));
+                }
+                throw new SharkOperationError($"<= operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Lt(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Lt(((SkValue)right));
+                }
+                throw new SharkOperationError($"< operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Eq(SkObject left, SkObject right){
 
                 if(left.BaseType == right.BaseType){
                     if(left.BaseType == SkObjectType.OT_VALUE){
-                        SkValue value1 = (SkValue)left;
-                        SkValue value2 = (SkValue)right;
+                        return ((SkValue)left).Eq(((SkValue)right));
+                    }else{
+                        return left == right ? SkBool.TRUE : SkBool.FALSE;
+                    }
+                }else{
+                    return SkBool.FALSE;
+                }
+            }
 
-                        if(value1.ValueType == value2.ValueType && value1.ValueType == SkValueType.VT_INT){
-                            return (SkInt)value1 + (SkInt)value2;
-                        }
+            /// <summary>
+            /// 仅用于检查常量是否相等
+            /// </summary>
+            public static bool ConstantEquals(SkObject left, SkObject right){
+                if(left.BaseType == right.BaseType){
+                    switch(left.BaseType){
+                        case SkObjectType.OT_STRING:
+                        return ((SkString)left).text.Equals(((SkString)right).text);
+                        
+                        case SkObjectType.OT_VALUE:
+                        return ValueEquals((SkValue)left, (SkValue)right);
+
+                        default:
+                        return false;
                     }
                 }
-                throw new SharkError("不支持的加法操作");
+                return false;
+            }
+            public static bool ValueEquals(SkValue left, SkValue right){
+
+                return left.getFloat() == right.getFloat();
+            }
+            public static SkObject Ne(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Ne(((SkValue)right));
+                }
+                throw new SharkOperationError($"!= operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Not(SkObject value){
+
+                if(value.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)value).Not();
+                }
+                throw new SharkOperationError($"! operation is unsupportted on {value.BaseType}");
+            }
+            public static SkObject And(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).And(((SkValue)right));
+                }
+                throw new SharkOperationError($"&& operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Or(SkObject left, SkObject right){
+
+                if(left.BaseType == right.BaseType && left.BaseType == SkObjectType.OT_VALUE){
+                    return ((SkValue)left).Or(((SkValue)right));
+                }
+                throw new SharkOperationError($"|| operation is unsupportted between {left.BaseType} and {right.BaseType}");
+            }
+            public static SkObject Index(SkObject list, int index){
+                
+                if(list.BaseType == SkObjectType.OT_LIST){
+
+                    SkList _list = (SkList)list;
+                    if(index >= 0 && index < _list.Size){
+                        return _list.__index(index);
+                    }
+                    throw new SharkIndexOutOfArrayError($"index out of range at line {SharkVM.CurrentLine.ToString()}");
+                }
+                throw new SharkOperationError($"cannot index data from type {list.BaseType.ToString()} at line {SharkVM.CurrentLine.ToString()}");
             }
         }
+
+
+        /// <summary>
+        /// 存储所有属于该类别的函数集合
+        /// </summary>
+        public class SkClass{
+            public Dictionary<int, SkObject> classFields;
+            public SkClass(){
+                classFields = new Dictionary<int, SkObject>();
+            }
+        }
+
+        /// <summary>
+        /// Shark元表, 任何具有该结构的对象都可以作为对象头中的父对象用于存储数据
+        /// </summary>
+        public interface SkMetaTable{
+
+            public void SetField(SkObject value, int id);
+            public SkObject GetField(int id);
+        }
+
+        // /// <summary>
+        // /// Shark对象头, 用于记录Object所属的对象以及其可以访问的固定函数
+        // /// </summary>
+        // public class SkObjectHeader{
+
+        //     private SkMetaTable parent;
+        //     private SkClass metaClass;
+
+        //     public SkObjectHeader(SkClass prototype){
+        //         this.metaClass = prototype;
+        //     }
+        //     public void bindParent(SkMetaTable parent){
+        //         this.parent = parent;
+        //     }
+        //     public void SetField(SkObject value, int id){
+        //         this.parent.SetField(value, id);
+        //     }
+        // }
 
 
         /// <summary>
@@ -1954,19 +2765,203 @@ namespace Shark{
         /// </summary>
         public class SkObject{
 
-            public static SkObject SkNull = new SkObject(SkObjectType.OT_NULL);
+            private int id;
+            private string symbol;
+            private SkMetaTable header;
+            private SkObjectType baseType;
 
-            protected SkObjectType baseType;
+            public int ID{
+                get => id;
+            }
+            public string Symbol{
+                get => symbol;
+            }
             public SkObjectType BaseType{
                 get => baseType;
             }
-            public SkObject(){
-                baseType = SkObjectType.OT_NULL;
-            }
             public SkObject(SkObjectType type){
                 baseType = type;
+                this.id = -1;
+                this.symbol = null;
+            }
+            public SkObject(int id, string symbol, SkObjectType type){
+                baseType = type;
+                this.id = id;
+                this.symbol = symbol;
+            }
+            public void RewriteObject(SkObject value){
+
+                value.inheritFrom(this);
+                header.SetField(value, id);
+            }
+            public void bindHeader(SkMetaTable header){
+                this.header = header;
+            }
+            public void inheritFrom(SkObject old){
+
+                id = old.ID;
+                symbol = old.Symbol;
+                bindHeader(old.header);
             }
         }
+        public class SkNull: SkObject{
+            public static SkNull NULL = new SkNull();
+            public SkNull():base(SkObjectType.OT_NULL){}
+            public override string ToString()
+            {
+                return "null";
+            }
+        }
+
+        public enum SkFunctionType{
+
+            NativeCS,
+            Shark,
+        }
+
+        public abstract class SkCallable: SkObject{
+
+            public readonly SkFunctionType callableType;
+            public SkCallable(SkFunctionType type):base(SkObjectType.OT_FUNCTION){
+
+                callableType = type;
+            }
+            public abstract SkObject call(SkTuple paramlist);
+        }
+        public delegate SkObject __c_function(SkTuple paramlist);
+
+        public class NativeFunction: SkCallable{
+
+            __c_function __callable;
+            public NativeFunction(__c_function target):base(SkFunctionType.NativeCS){
+                __callable = target;
+            }
+            public override SkObject call(SkTuple paramlist){
+                return __callable(paramlist);
+            }
+        }
+
+        public class SharkFunction: SkCallable, SharkRunable{
+
+            private SharkILStream codes;
+            private int pointer;
+            private Dictionary<int, SkObject> stack;         // 临时栈
+            private Dictionary<int, SkObject> table;         // this表
+            private SharkRunable parent;
+            private SharkScript G;
+            private SharkVM interpreter;
+            private int line;
+
+            public SharkFunction(SharkScript G, SharkRunable parent): base(SkFunctionType.Shark){
+
+                this.G = G;
+                this.parent = parent;
+            }
+            public override SkObject call(SkTuple paramlist)
+            {
+                throw new NotImplementedException();
+            }
+            public string getSymbol(int id){
+                return G.getSymbol(id);
+            }
+            public SkObject getVariable(int id){
+                if(stack.ContainsKey(id)){
+                    return stack[id];
+                }else if(table.ContainsKey(id)){
+                    return stack[id];
+                }else{
+                    return parent.getVariable(id);
+                }
+            }
+            /// <summary>
+            /// 设置函数当前的变量
+            /// </summary>
+            public void setVariable(SkObject value, int id){
+
+
+            }
+            public bool hasParent(){
+                return true;
+            }
+            public void loadCommands(SharkILStream stream){
+
+                this.codes = stream;
+            }
+            public bool shouldContinue(){
+
+                return pointer < codes.Size;
+            }
+            public SkObject run(SkTuple paramlist){
+
+                throw new SharkError("nothing...");
+            }
+            public int getCurrentLine(){
+
+                return line;
+            }
+            public void run(){
+
+                throw new SharkError($"cannot call function as script at line {line.ToString()}");
+            }
+            public void bindVM(SharkVM vm){
+                interpreter = vm;
+            }
+            public void jumpTo(int position){
+                pointer = position;
+            }
+            public void jumpOffset(int length){
+                pointer += length;
+            }
+        }
+
+        /// <summary>
+        /// Shark元表类, 会维护一个字典, 用字典来模拟类的实现
+        /// </summary>
+        public class SkTable: SkObject, SkMetaTable{
+
+            public Dictionary<int, SkObject> table;
+            private readonly bool isFixedTable;
+            public SkTable(bool isFixed = false):base(SkObjectType.OT_TABLE){
+
+                table = new Dictionary<int, SkObject>();
+                isFixedTable = isFixed;
+            }
+            public SkObject Getter(int id){
+
+                if(table.ContainsKey(id)){
+                    return table[id];
+                }
+                return SkNull.NULL;
+            }
+            public void Setter(SkObject value, int id){
+
+                if(isFixedTable)return;
+                if(table.ContainsKey(id)){
+                    table[id] = value;
+                }else{
+                    table.Add(id, value);
+                }
+            }
+ 
+            /// <summary>
+            /// dot value from 'this' table
+            /// </summary>
+            public SkObject GetField(int id){
+                
+                if(table.ContainsKey(id)){
+                    return table[id];
+                }
+                return SharkCore.NULL;
+            }
+            public void SetField(SkObject value, int id){
+                if(table.ContainsKey(id)){
+                    table[id] = value;
+                }else{
+                    table.Add(id, value);
+                }
+            }
+        }
+
 
         public class SkString: SkObject{
 
@@ -1983,7 +2978,7 @@ namespace Shark{
             }
         }
 
-        public class SkValue: SkObject{
+        public abstract class SkValue: SkObject{
 
             protected SkValueType valueType;
             public SkValueType ValueType{
@@ -1992,6 +2987,26 @@ namespace Shark{
             public SkValue(SkValueType type):base(SkObjectType.OT_VALUE){
                 valueType = type;
             }
+            public T GetInstance<T>() where T: SkValue{
+                return (T)this;
+            }
+            public abstract float getFloat();
+            public abstract SkValue Add(SkValue other);
+            public abstract SkValue Sub(SkValue other);
+            public abstract SkValue Mul(SkValue other);
+            public abstract SkValue Div(SkValue other);
+            public abstract SkValue Mod(SkValue other);
+            public abstract SkValue Neg();
+            public abstract SkValue Ge(SkValue other);
+            public abstract SkValue Gt(SkValue other);
+            public abstract SkValue Le(SkValue other);
+            public abstract SkValue Lt(SkValue other);
+            public abstract SkValue Eq(SkValue other);
+            public abstract SkValue Ne(SkValue other);
+            public abstract SkValue And(SkValue other);
+            public abstract SkValue Or(SkValue other);
+            public abstract SkValue Not();
+
         }
 
         public class SkInt: SkValue{
@@ -2002,64 +3017,576 @@ namespace Shark{
             public SkInt(int value):base(SkValueType.VT_INT){
                 data = value;
             }
+            public SkBool toBool(){
+                return data == 0 ? SkBool.FALSE : SkBool.TRUE;
+            }
             public override string ToString()
             {
                 return data.ToString();
             }
-            public static SkInt operator+(SkInt left, SkInt right){
-                return new SkInt(left.data + right.data);
+            public override float getFloat()
+            {
+                return (float)data;
             }
-            public static SkInt operator-(SkInt left, SkInt right){
-                return new SkInt(left.data - right.data);
+            public override SkValue Add(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkInt(data + other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data + other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkInt(data + other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
             }
-            public static SkInt operator*(SkInt left, SkInt right){
-                return new SkInt(left.data * right.data);
+            public override SkValue Sub(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkInt(data - other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data - other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkInt(data - other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
             }
-            public static SkInt operator/(SkInt left, SkInt right){
-                return new SkInt(left.data / right.data);
+            public override SkValue Mul(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkInt(data * other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data * other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkInt(data * other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
             }
-            public static SkInt operator%(SkInt left, SkInt right){
-                return new SkInt(left.data % right.data);
+            public override SkValue Div(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkInt(data / other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data / other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkInt(data / other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Mod(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkInt(data % other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data % other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkInt(data % other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Neg(){
+                return new SkInt(-data);
+            }
+            public override SkValue Ge(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data >= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data >= other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data >= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Gt(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data > other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data > other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data > other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Le(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data <= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data <= other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data <= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Lt(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data < other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data < other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data < other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Eq(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data == other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data == other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data == other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Ne(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data != other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data != other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data != other.GetInstance<SkBool>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue And(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.And(GetInstance<SkInt>().toBool(), other.GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.And(GetInstance<SkFloat>().toBool(), other.GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.And(GetInstance<SkBool>(), other.GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Or(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.Or(GetInstance<SkInt>().toBool(), other.GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.Or(GetInstance<SkFloat>().toBool(), other.GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.Or(GetInstance<SkBool>(), other.GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Not(){
+
+                switch(ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.Not(GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.Not(GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.Not(GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
             }
         }
 
         public class SkFloat: SkValue{
 
-            public float value;
+            public float data;
             public SkFloat():base(SkValueType.VT_FLOAT){
-                value = 0;
+                data = 0;
             }
             public SkFloat(float value):base(SkValueType.VT_FLOAT){
-                this.value = value;
+                this.data = value;
+            }
+            public SkBool toBool(){
+
+                return data == 0 ? SkBool.FALSE : SkBool.TRUE;
             }
             public override string ToString()
             {
-                return value.ToString();
+                return data.ToString();
+            }
+            public override float getFloat()
+            {
+                return data;
+            }
+            public override SkValue Add(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkFloat(data + other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data + other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkFloat(data + other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Sub(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkFloat(data - other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data - other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkFloat(data - other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Mul(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkFloat(data * other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data * other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkFloat(data * other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Div(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkFloat(data / other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data / other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkFloat(data / other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Mod(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return new SkFloat(data % other.GetInstance<SkInt>().data);
+
+                    case SkValueType.VT_FLOAT:
+                    return new SkFloat(data % other.GetInstance<SkFloat>().data);
+
+                    case SkValueType.VT_BOOLEAN:
+                    return new SkFloat(data % other.GetInstance<SkBool>().data);
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Neg(){
+                return new SkFloat(-data);
+            }
+            public override SkValue Ge(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data >= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data >= other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data >= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Gt(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data > other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data > other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data > other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Le(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data <= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data <= other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data <= other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Lt(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data < other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data < other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data < other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Eq(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data == other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data == other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data == other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Ne(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return data != other.GetInstance<SkInt>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_FLOAT:
+                    return data != other.GetInstance<SkFloat>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    case SkValueType.VT_BOOLEAN:
+                    return data != other.GetInstance<SkBool>().data ? SkBool.TRUE : SkBool.FALSE;
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue And(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.And(GetInstance<SkInt>().toBool(), other.GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.And(GetInstance<SkFloat>().toBool(), other.GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.And(GetInstance<SkBool>(), other.GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Or(SkValue other){
+
+                switch(other.ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.Or(GetInstance<SkInt>().toBool(), other.GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.Or(GetInstance<SkFloat>().toBool(), other.GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.Or(GetInstance<SkBool>(), other.GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
+            }
+            public override SkValue Not(){
+
+                switch(ValueType){
+                    case SkValueType.VT_INT:
+                    return SharkAPI.Not(GetInstance<SkInt>().toBool());
+
+                    case SkValueType.VT_FLOAT:
+                    return SharkAPI.Not(GetInstance<SkFloat>().toBool());
+
+                    case SkValueType.VT_BOOLEAN:
+                    return SharkAPI.Not(GetInstance<SkBool>());
+
+                    default:
+                    // this code would never be run
+                    return null;
+                }
             }
         }
 
-        public class SkBool: SkValue{
+        public class SkBool: SkInt{
 
-            public static SkBool SkTRUE = new SkBool(true);
-            public static SkBool SkFALSE = new SkBool(false);
-
-            public readonly bool value;
-            public SkBool():base(SkValueType.VT_BOOLEAN){
-                value = false;
+            public static SkBool TRUE = new SkBool(1);
+            public static SkBool FALSE = new SkBool(0);
+            public static SkBool[] Bools = new SkBool[]{FALSE, TRUE};
+            public static string[] BoolStrings = new string[]{"false", "true"};            
+            public SkBool(int value):base(value){}
+            public override string ToString()
+            {
+                return BoolStrings[data];
             }
-            public SkBool(bool value):base(SkValueType.VT_BOOLEAN){
-                this.value = value;
+        }
+
+        public class SkList: SkObject{
+
+            private List<SkObject> list;
+            public int Size{
+                get => list.Count;
+            }
+            public SkList():base(SkObjectType.OT_LIST){
+                list = new List<SkObject>();
+            }
+            public SkObject __index(int index){
+                return list[index];
+            }
+            public void Append(SkObject item){
+                list.Add(item);
+            }
+            public void Remove(SkObject item){
+                list.Remove(item);
+            }
+            public void Pop(){
+                list.RemoveAt(Size - 1);
             }
         }
 
         public class SkTuple: SkObject{
 
-            public SkObject[] tuple;
+            public static SkTuple emptyList = new SkTuple(0);
+
+            private SkObject[] tuple;
+            public int Size{
+                get => tuple.Length;
+            }
             public SkTuple(int length):base(SkObjectType.OT_TUPLE){
                 tuple = new SkObject[length];
             }
-            public SkObject Index(int index){
+            public SkObject __index(int index){
                 return tuple[index];
+            }
+            public void __set_index(int index, SkObject value){
+                tuple[index] = value;
             }
         }
     }

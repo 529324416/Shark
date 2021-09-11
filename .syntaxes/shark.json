@@ -1,0 +1,17 @@
+{
+    "contributes":{
+        "languages":[
+            {
+                "id":"sk",
+                "extensions":[".sk"]
+            }
+        ],
+        "grammars":[
+            {
+                "languages":"Shark",
+                "scopeName":"source.sk",
+                "path":"./syntaxes/sk.tmGrammar.json"
+            }
+        ]
+    }
+}
