@@ -1,0 +1,36 @@
+--- FUNC INFO: doing ---
+[指令集]
+OP_PUSH_VAR 0
+OP_PUSH_CONST 0
+JCALL 1
+
+[访问变量集合]
+0 : print
+
+[持有变量集合]
+
+[上值集合]
+0 : print
+
+--- FUNC INFO: test ---
+[指令集]
+OP_PUSH_CONST 1
+OP_SET_LOCAL 2
+OP_PUSH_VAR 2
+RET
+
+[访问变量集合]
+2 : doing
+
+[持有变量集合]
+2 : doing
+
+[上值集合]
+
+--- 脚本中间代码 ---
+OP_PUSH_CONST 2
+OP_SET_LOCAL 1
+OP_PUSH_VAR 1
+CALL 0
+JCALL 0
+OP_END

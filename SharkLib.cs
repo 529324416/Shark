@@ -31,7 +31,8 @@ namespace Shark{
 
                 List<SkPack> O = new List<SkPack>();
                 O.Add(new SkPack(0, "print", new NativeFunction(Print)));
-                O.Add(new SkPack(1, "pow", new NativeFunction(Pow)));
+                O.Add(new SkPack(1, "get_parent", new NativeFunction(FunctionDebug)));
+                // O.Add(new SkPack(1, "pow", new NativeFunction(Pow)));
                 return O;
             }
 
@@ -57,6 +58,18 @@ namespace Shark{
 
                     throw new SharkTypeError($"invalid cast from SkObject to SkInt at line {VM.currentLine.ToString()}");
                 }
+            }
+            public static SkObject FunctionDebug(SkTuple args){
+
+                SkObject func = args.__index(0);
+                if(func is SharkFunction){
+                    SharkFunction _func = (SharkFunction)func;
+                    SharkFunction parent = (SharkFunction)(_func.Parent);
+                    Console.WriteLine(parent.accessLocalVariable(3));
+                }else{
+                    Console.WriteLine("不支持调试的对象");
+                }
+                return SkNull.NULL;
             }
         }
     }

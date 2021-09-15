@@ -21,25 +21,38 @@ namespace Shark
         static void Main(string[] args)
         {
             // 执行中间代码
+            SharkVM vm = new SharkVM();
             SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.js"));
             SkParser parser = new SkParser();
-            parser.loadLexerSouce(lexer);
-            while(parser.hasMore){
-                parser.nextStatement();
-                Console.WriteLine("test");
-            }
+            parser.loadLexerSouce(lexer);                               // 初始化语法解析器
+            parser.parseScript();                                       // 语法解析
+
+
+            SharkScript script = parser.generateScript(false);          // 生成脚本
+            vm.LoadScript(script);
+            script.DEBUG_MODEL = false;
             
-            Console.WriteLine("--- 中间代码 ---");
-            parser.emitter.showBuffer();
+            parser.DEBUG_INFOS.Add("--- 脚本中间代码 ---");
+            script.SaveToList(parser.DEBUG_INFOS);
+            WriteToFile("./internal_code.txt", parser.DEBUG_INFOS);
         
 
             Console.WriteLine("--- 执行结果 ---");
-            SharkScript script = parser.generateScript();
-            SharkVM vm = new SharkVM();
+            try{
+                script.runScript();
+            }catch(SharkError e){
+                Console.WriteLine(e.Message);
+                Console.ForegroundColor = ConsoleColor.Green;
+            }
+
+            // vm.currentRunable.showCodes();
+
+
+            // Console.WriteLine(script.getVariable("_"));
             // vm.RunScript(script);
 
-            // Console.WriteLine(script.getVariable(2));
-            //Console.WriteLine(vm.stack.Pop());
+            // Console.WriteLine(script.getVariable("x"));
+            // Console.WriteLine(vm.stack.Pop());
             // 执行中间代码结束
 
 
@@ -127,6 +140,21 @@ namespace Shark
             p.WaitForExit();
             p.Close();
 
+        }
+
+        public static void WriteToFile(string filepath, List<string> contents){
+
+            if(File.Exists(filepath)){
+                File.Delete(filepath);
+            }
+
+            FileStream file = File.OpenWrite(filepath);
+            StreamWriter writer = new StreamWriter(file);
+            foreach(string line in contents){
+                writer.WriteLine(line);
+            }
+            writer.Close();
+            file.Close();
         }
     }
 }
