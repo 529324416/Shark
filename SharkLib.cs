@@ -65,7 +65,6 @@ namespace Shark{
                 if(func is SharkFunction){
                     SharkFunction _func = (SharkFunction)func;
                     SharkFunction parent = (SharkFunction)(_func.Parent);
-                    Console.WriteLine(parent.accessLocalVariable(3));
                 }else{
                     Console.WriteLine("不支持调试的对象");
                 }

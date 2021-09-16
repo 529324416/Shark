@@ -127,6 +127,7 @@ namespace Shark{
             // split sign
             TOKEN_COMMA,                    //,
             TOKEN_COLON,                    //:
+            TOKEN_SEMIC_COLON,              //;
             TOKEN_LEFT_PAREN,               //(
             TOKEN_RIGHT_PAREN,              //) 
             TOKEN_LEFT_BRACKETS,            //[
@@ -583,6 +584,9 @@ namespace Shark{
 
                     case ':':
                     return makeToken(SkTokenType.TOKEN_COLON);
+
+                    case ';':
+                    return makeToken(SkTokenType.TOKEN_SEMIC_COLON);
 
                     case '(':
                     return makeToken(SkTokenType.TOKEN_LEFT_PAREN);
@@ -1513,6 +1517,7 @@ namespace Shark{
                     index ++;
                 }
                 currentScript = lexer.generateScript();
+                SharkInternalCodeBase.currentScript = currentScript;
                 // 接受到标记队列时生成目标脚本, 但此时的脚本中间代码为空, 需要解析后写入
             }
             public void nextFactor(){
@@ -1557,9 +1562,44 @@ namespace Shark{
                     nextList();
                     break;
 
-                    
+                    case SkTokenType.TOKEN_FUNC:
+                    moveToNext();
+                    nextAnonymousFunctionDefine();
+                    break;
+
+                    case SkTokenType.TOKEN_THIS:
+                    moveToNext();
+                    emitter.pushThis(currentLine);
+                    nextThisFactor();
+                    break;
+
+                    case SkTokenType.TOKEN_LEFT_PAREN:
+                    moveToNext();
+                    nextLogicExpr();
+                    if(!matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                        throw new SharkSyntaxError($"sub expression should end with \")\" at line {currentLine.ToString()}");
+                    }
+                    break;
                 }
             }
+
+            public void nextAnonymousFunctionDefine(){
+                /* 匿名函数定义 */
+
+                SharkFunctionCore functionCore = new SharkFunctionCore();
+                List<int> paramlist = nextFunctionDefParamlist();
+                
+                emitter.defineFunction();
+                nextBody();
+                functionCore.loadFunctionCore(emitter.endDefineFunction(currentLine), paramlist);
+                int functionID = currentScript.registerNewFunction(functionCore);
+
+                DEBUG_INFOS.Add($"--- FUNC INFO: 匿名函数_{functionID} ---");
+                functionCore.saveToList(DEBUG_INFOS);
+                DEBUG_INFOS.Add(string.Empty);
+                emitter.pushOperator32Bit(SharkOpcodeType.OP_PUSH_FUNC, functionID, currentLine);
+            }
+
             /// <summary>
             /// 当在因子检测器中遇到了], 获取完整的列表
             /// </summary>
@@ -1579,9 +1619,8 @@ namespace Shark{
                     nextIDFactor();
                 }else if(matchToken(SkTokenType.TOKEN_DOT)){
                     // getter
-
                     if(matchToken(SkTokenType.TOKEN_ID)){
-                        //TODO 处理DOT操作
+                        emitter.pushGetField(((SharkTokenVariable)lastToken).variableID, currentLine);
                     }else{
                         throw new SharkSyntaxError($"expect variable name after \".\" at line {currentLine.ToString()}");
                     }
@@ -1597,6 +1636,7 @@ namespace Shark{
                 }
             }
             public void nextIDFactor(){
+                /* 辅助nextIDFactor(int)函数进行连续后缀检测 */
 
                 if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
                     // 函数调用
@@ -1622,6 +1662,20 @@ namespace Shark{
                     nextIDFactor();
                 }
             }
+            public void nextThisFactor(){
+                /* 在factor中遇到this时，进行this的后缀检测 */
+
+                if(matchToken(SkTokenType.TOKEN_DOT)){
+                    // 从this中索引一个值
+                    if(matchToken(SkTokenType.TOKEN_ID)){
+                        /* 仅支持从this中索引一个符号，其他索引会被认为是语法异常 */
+                        emitter.pushGetField(((SharkTokenVariable)lastToken).variableID, currentLine);
+                    }else{
+                        throw new SharkSyntaxError($"expect variable name after \".\" at line {currentLine.ToString()}");
+                    }
+                }
+            }
+            
             public void nextNegative(){
 
                 if(matchToken(SkTokenType.TOKEN_SUB)){
@@ -1736,6 +1790,11 @@ namespace Shark{
                     break;
 
                     case SkTokenType.TOKEN_ASSIGN_ADD:
+                    moveToNext();
+                    emitter.pushVar(id, currentLine);
+                    nextMathExpr();
+                    emitter.pushOperatorNoParam(SharkOpcodeType.OP_ADD, currentLine);
+                    emitter.pushSetLocal(id, currentLine);
                     break;
 
                     case SkTokenType.TOKEN_ASSIGN_SUB:
@@ -1990,13 +2049,79 @@ namespace Shark{
             public void nextWhile(){
 
                 int position = emitter.LastOpcodePosition;
+                emitter.defineWhile();
                 nextCondition();
-                SharkInternalCode_1_32BIT jumpFalse = new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_FALSE, 0, currentLine, emitter.BufferSize);
+                SharkInternalCode_1_32BIT jumpFalse = 
+                    new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_FALSE, 0, currentLine, emitter.BufferSize);
                 emitter.buffer.Add(jumpFalse);
                 jumpFalse.IntValue = nextBody() + 1;
                 emitter.pushOperator32Bit(SharkOpcodeType.JMP_TO, position, currentLine);
+                emitter.endDefineWhile();
             }
+            public void nextFor(){
 
+                if(matchToken(SkTokenType.TOKEN_LEFT_PAREN)){
+                    // 计数循环条件必须由括号开始
+
+                    nextForAssign();
+                    SharkInternalCode_1_32BIT branch = nextForCondition();
+                    List<SharkInternalCodeBase> changerCodes = nextForConditionChanger();
+
+                    int size = nextBody();
+                    int pos = emitter.BufferSize;
+                    foreach(SharkInternalCodeBase code in changerCodes){
+                        code.codeNumber += pos;
+                        emitter.buffer.Add(code);
+                    }
+                    size += changerCodes.Count;
+                    int entrance = emitter.endDefineFor();
+                    emitter.pushOperator32Bit(SharkOpcodeType.JMP_TO, entrance, currentLine);
+                    branch.IntValue = size + 1;
+                }else{
+                    throw new SharkSyntaxError($"for loop condition must start with a \"(\" at line {currentLine.ToString()}");
+                }
+                
+            }
+            public void nextForAssign(){
+                /* 特殊的赋值查询, 仅用于for循环 */
+
+                if(matchToken(SkTokenType.TOKEN_ID)){
+                    int varID = ((SharkTokenVariable)lastToken).variableID;         // variable id
+                    if(matchToken(SkTokenType.TOKEN_ASSIGN)){
+                        nextMathExpr();
+                        emitter.pushSetLocal(varID, currentLine);
+                        if(matchToken(SkTokenType.TOKEN_SEMIC_COLON)){
+                            emitter.defineFor();
+                            return;
+                        }
+                        throw new SharkSyntaxError($"for condition should split with \";\" at line {currentLine.ToString()}");
+                    }
+                    throw new SharkSyntaxError($"expect \"=\" after sign {currentScript.getSymbol(varID)} at line {currentLine.ToString()}");
+                }
+                throw new SharkSyntaxError($"for loop need a loop variable at line {currentLine.ToString()}");
+            }
+            public SharkInternalCode_1_32BIT nextForCondition(){
+                /* 特殊的条件表达式, 仅用于for循环 */
+
+                nextLogicExpr();
+                if(!matchToken(SkTokenType.TOKEN_SEMIC_COLON)){
+                    throw new SharkSyntaxError($"for condition should split with \";\" at line {currentLine.ToString()}");
+                }
+                SharkInternalCode_1_32BIT code = new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_FALSE, 0, currentLine, emitter.BufferSize);
+                emitter.buffer.Add(code);
+                return code;
+            }
+            public List<SharkInternalCodeBase> nextForConditionChanger(){
+                /* 条件表达式状态改变器 */
+                
+                emitter.holdBranchBuffer();
+                nextStatement();
+                Console.WriteLine(currentToken);
+                if(matchToken(SkTokenType.TOKEN_RIGHT_PAREN)){
+                    return emitter.releaseBranchBuffer();
+                }
+                throw new SharkSyntaxError($"for condition should end with \")\" at line {currentLine.ToString()}");
+            }
 
             /// <summary>
             /// 解析一个完整的普通函数定义，普通函数的定义必须有一个函数名，
@@ -2121,6 +2246,25 @@ namespace Shark{
                 }else if(matchToken(SkTokenType.TOKEN_FOR)){
                     // 计数循环
 
+                    nextFor();
+                }else if(matchToken(SkTokenType.TOKEN_BREAK)){
+
+                    if(emitter.isDefineWhile){
+                        emitter.pushWhileBreak(currentLine);
+                    }else{
+                        throw new SharkSyntaxError($"\"break\" can only used in while or for loop at line {currentLine.ToString()}");
+                    }
+                }else if(matchToken(SkTokenType.TOKEN_CONTINUE)){
+
+                    if(emitter.isDefineWhile){
+                        emitter.pushWhileContinue(currentLine);
+                    }else{
+                        throw new SharkSyntaxError($"\"continue\" can only used in while or for loop at line {currentLine.ToString()}");
+                    }
+                }else if(matchToken(SkTokenType.TOKEN_THIS)){
+
+                    emitter.pushThis(currentLine);
+                    nextStatementID();
                 }else{
                     throw new SharkSyntaxError($"invalid statement starter \"{currentToken.ToString()}\" at line {currentLine.ToString()}");
                 }
@@ -2192,6 +2336,8 @@ namespace Shark{
             OP_SET_LOCAL,          /* 从堆栈中取出一个值，然后将其赋值给全局表中指定的对象 */
             OP_GET_FIELD,          /* 从堆栈中取出一个对象，并从中访问一个指定的字段，再次压入堆栈中 */
             OP_PUSH_FUNC,          /* 从函数表中取出一个函数核心, 然后创建一个函数并压入堆栈中*/
+            OP_PUSH_THIS,          /* 向堆栈中压入当前函数的this表 */
+            OP_PUSH_GLOBAL,         /* 向堆栈中压入当前的全局表 */
             OP_INDEX,
             CALL,
             JCALL,                 // 调用的函数结果并不会压住堆栈中
@@ -2241,6 +2387,8 @@ namespace Shark{
         /// Shark中间代码, 运行时形态, 从二进制文件中释放成该数据类型
         /// </summary>
         public abstract class SharkInternalCodeBase{
+
+            public static SharkScript currentScript;
 
             public readonly string contextInfo;
             public readonly int line;
@@ -2294,12 +2442,18 @@ namespace Shark{
             }
             public override string ToString()
             {
-                // if(opType == SharkOpcodeType.OP_PUSH_CONST){
-                //     return $"{opType.ToString()} {__data.value_int.ToString()}";
-                // }else if(opType == SharkOpcodeType.OP_PUSH_VAR){
-                //     return $"{opType.ToString()} {__data.value_int.ToString()}";
-                // }
-                return $"{codeNumber.ToString()}: {opType.ToString()} {__data.value_int.ToString()}";
+                if(opType == SharkOpcodeType.OP_PUSH_CONST){
+                    return $"{codeNumber.ToString()}: {opType.ToString()} {SharkInternalCodeBase.currentScript.__get_const(__data.value_int)}";
+                }else if(opType == SharkOpcodeType.OP_PUSH_VAR){
+                    return $"{codeNumber.ToString()}: {opType.ToString()} {SharkInternalCodeBase.currentScript.getSymbol(__data.value_int)}";
+                }else if(opType == SharkOpcodeType.OP_SET_LOCAL){
+                    return $"{codeNumber.ToString()}: {opType.ToString()} {SharkInternalCodeBase.currentScript.getSymbol(__data.value_int)}";
+                }else if(opType == SharkOpcodeType.OP_GET_FIELD){
+                    return $"{codeNumber.ToString()}: {opType.ToString()} {SharkInternalCodeBase.currentScript.getSymbol(__data.value_int)}";
+                }else{
+                    return $"{codeNumber.ToString()}: {opType.ToString()} {__data.value_int.ToString()}";
+                }
+                
             }
 
         }
@@ -2359,13 +2513,12 @@ namespace Shark{
                 accessVariables.Add(varID);
             }
         }
-
         public class SharkCodeEmitter{
             public int BufferSize{
                 get => buffer.Count;
             }
             public int LastOpcodePosition{
-                get => buffer.Last().codeNumber;
+                get => buffer.Count > 0 ?  buffer.Last().codeNumber : -1;
             }
             public int CurrentIfBlockQuitPosition{
                 get => LastOpcodePosition + records.Count;
@@ -2383,16 +2536,28 @@ namespace Shark{
             public Stack<List<SharkInternalCodeBase>> bufferStack;
             public Stack<AccessChecker> checkerStack;
 
+            //! 关于while循环的定义
+            public bool isDefineWhile;
+            public List<SharkInternalCode_1_32BIT> whileBreaks;
+            public int whileEntrance;
+            //! 关于while循环的定义
+
+            //! 关于for循环的定义
+            public bool isDefineFor;
+            public List<SharkInternalCode_1_32BIT> forBreaks;
+            public Stack<int> forEntrance;
+            //! 关于for循环的定义
+
             public SharkCodeEmitter(){
                 buffer = new List<SharkInternalCodeBase>();
                 bufferStack = new Stack<List<SharkInternalCodeBase>>();
                 records = new Stack<int>();
                 checkerStack = new Stack<AccessChecker>();
+
+                whileBreaks = new List<SharkInternalCode_1_32BIT>();
+                forBreaks = new List<SharkInternalCode_1_32BIT>();
+                forEntrance = new Stack<int>();
             }
-
-
-
-
             public void showBuffer(){
 
                 for(int i = 0; i < buffer.Count; i ++){
@@ -2406,6 +2571,62 @@ namespace Shark{
                 lastRecord = records.Pop();
                 return BufferSize - lastRecord;
             }
+            public void defineWhile(){
+                isDefineWhile = true;
+                whileEntrance = LastOpcodePosition;
+            }
+            public void endDefineWhile(){
+                foreach(SharkInternalCode_1_32BIT opcode in whileBreaks){
+                    opcode.IntValue = LastOpcodePosition;
+                }
+                isDefineWhile = false;
+                whileBreaks.Clear();
+            }
+            public void pushWhileBreak(int line){
+                SharkInternalCode_1_32BIT opcode = new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_TO, 0, line, BufferSize);
+                buffer.Add(opcode);
+                whileBreaks.Add(opcode);
+            }
+            public void pushWhileContinue(int line){
+
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_TO, whileEntrance, line, BufferSize));
+            }
+            public void defineFor(){
+
+                isDefineFor = true;
+                forEntrance.Push(LastOpcodePosition);
+            }
+            public void holdBranchBuffer(){
+
+                List<SharkInternalCodeBase> _buf = new List<SharkInternalCodeBase>();
+                bufferStack.Push(buffer);
+                buffer = _buf;
+            }
+            public List<SharkInternalCodeBase> releaseBranchBuffer(){
+
+                List<SharkInternalCodeBase> _buf = buffer;
+                buffer = bufferStack.Pop();
+                return _buf;
+            }
+            public int endDefineFor(){
+                int quitPosition = LastOpcodePosition;
+                foreach(SharkInternalCode_1_32BIT opcode in forBreaks){
+                    opcode.IntValue = quitPosition;
+                }
+                isDefineWhile = false;
+                forBreaks.Clear();
+                return forEntrance.Pop();
+            }
+            public void pushForBreak(int line){
+
+                SharkInternalCode_1_32BIT opcode = new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_TO, 0, line, BufferSize);
+                buffer.Add(opcode);
+                forBreaks.Add(opcode);
+            }
+            public void pushForContinue(int line){
+
+                buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.JMP_TO, forEntrance.Peek(), line, BufferSize));
+            }
             public void defineFunction(){
 
                 if(currentAccessChecker != null){
@@ -2416,10 +2637,6 @@ namespace Shark{
                 bufferStack.Push(buffer);                   // save parent buffer
                 buffer = _buf;
             }
-
-            /// <summary>
-            /// 获取函数对象
-            /// </summary>
             public Tuple<SharkILStream, AccessChecker> endDefineFunction(int line){
 
                 // 如果最后一个指令不是RETURN的话, 则新增一个RETURN指令
@@ -2503,8 +2720,11 @@ namespace Shark{
 
                 buffer.Add(new SharkInternalCode_1_32BIT(SharkOpcodeType.OP_PUSH_FUNC, functionID, line, buffer.Count));
             }
-        }
+            public void pushThis(int line){
 
+                buffer.Add(new SharkInternalCodeNoParam(SharkOpcodeType.OP_PUSH_THIS, line, BufferSize));
+            }
+        }
         public interface SharkRunable{
 
             string getSymbol(int id);
@@ -2521,12 +2741,12 @@ namespace Shark{
             int getEndPosition();
             void showCodes();
             void jumpToEnd();
+            SkTable getThis();
         }
-
         public class SharkScript : SharkRunable{
 
             private SharkILStream codes;
-            private Dictionary<int, SkObject> thisTable;            // this表
+            private SkTable thisTable;            // this表
             private Dictionary<int, SkObject> cons;                 // 常量表
             private Dictionary<int, SharkFunctionCore> functions;   // 函数表
             private Dictionary<int, string> symbols;                // 符号表
@@ -2546,9 +2766,9 @@ namespace Shark{
                 }
 
                 cons = constantTable;
-                thisTable = new Dictionary<int, SkObject>();
+                thisTable = new SkTable();
                 foreach(SkPack pack in SharkCommonLib.commonLib){
-                    thisTable.Add(pack.id, pack.value);
+                    thisTable.SetField(pack.value, pack.id);
                 }
                 functions = new Dictionary<int, SharkFunctionCore>();
             }
@@ -2561,9 +2781,12 @@ namespace Shark{
             public string getSymbol(int id){
                 return symbols[id];
             }
+            public Dictionary<int, string> getSymbolTable(){
+                return symbols;
+            }
             public SkObject getVariable(int id){
-                if(thisTable.ContainsKey(id)){
-                    return thisTable[id];
+                if(thisTable.containsId(id)){
+                    return thisTable.__get_field(id);
                 }
                 throw new SharkNameError($"name {symbols[id]} is undefined at line {line.ToString()}");
             }
@@ -2576,11 +2799,7 @@ namespace Shark{
              }
             public void setVariable(SkObject value, int id){
 
-                if(thisTable.ContainsKey(id)){
-                    thisTable[id] = value;
-                }else{
-                    thisTable.Add(id, value);
-                }
+                thisTable.SetField(value, id);
             }
             public bool hasParent(){
                 return false;
@@ -2653,18 +2872,18 @@ namespace Shark{
                 }
                 return null;
             }
+            public SkTable getThis(){
+                return thisTable;
+            }
         }
-
         public delegate void opfunc_no_param();
         public delegate void opfunc_1_32bit(int ID);
         public delegate void opfunc_1_64bit(long ID);
-
         public enum FUNCTION_CALL_FLAG{
 
             JCALL,
             CALL
         }
-
         public class SharkVM{
 
             public static SharkVM vm;
@@ -2713,6 +2932,7 @@ namespace Shark{
                 op_search_table_no_param.Add(SharkOpcodeType.OP_END, OP_END);
                 op_search_table_no_param.Add(SharkOpcodeType.RET, RET);
                 op_search_table_no_param.Add(SharkOpcodeType.RET_NONE, RET_NONE);
+                op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_THIS, OP_PUSH_THIS);
                 
                 op_search_table_1_32bit = new Dictionary<SharkOpcodeType, opfunc_1_32bit>();
                 op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_VAR, OP_PUSH_VAR);
@@ -2725,6 +2945,7 @@ namespace Shark{
                 op_search_table_1_32bit.Add(SharkOpcodeType.JMP_TO, JUMP_TO);
                 op_search_table_1_32bit.Add(SharkOpcodeType.JMP, JUMP);
                 op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_FUNC, OP_PUSH_FUNC);
+                op_search_table_1_32bit.Add(SharkOpcodeType.OP_GET_FIELD, OP_GET_FIELD);
 
                 isCallFunctionNow = false;
             }
@@ -2743,8 +2964,9 @@ namespace Shark{
             public SkTuple loadParamlist(int count){
 
                 SkTuple tuple = new SkTuple(count);
+                int endIndex = count - 1;
                 for(int i = 0; i < count; i ++){
-                    tuple.__set_index(i, stack.Pop());
+                    tuple.__set_index(endIndex - i, stack.Pop());
                 }
                 return tuple;
             }
@@ -2838,9 +3060,9 @@ namespace Shark{
             public void OP_SET_LOCAL(int id){
 
                 SkObject value = stack.Pop();
-                Console.WriteLine($"准备写入值:{value}到变量:{currentScript.getSymbol(id)}, 当前运行时为:{currentRunable.GetHashCode()}");
+                // Console.WriteLine($"准备写入值:{value}到变量:{currentScript.getSymbol(id)}, 当前运行时为:{currentRunable.GetHashCode()}");
                 if(isCallFunctionNow && value.BaseType == SkObjectType.OT_FUNCTION_CORE){
-                    Console.WriteLine("正在设置一个函数对象");
+                    // Console.WriteLine("正在设置一个函数对象");
                     SharkFunctionCore functionCore = (SharkFunctionCore)value;
                     SharkFunction func = new SharkFunction(functionCore);
                     func.bindParent(currentRunable, currentScript);
@@ -2853,7 +3075,14 @@ namespace Shark{
             public void OP_SET_FIELD(){
 
                 SkObject value = stack.Pop();
-                stack.Pop().RewriteObject(value);
+                if(value is SharkFunctionCore){
+                    SharkFunction function = new SharkFunction((SharkFunctionCore)value);
+                    function.bindParent(currentRunable, currentScript);
+                    function.bindVM(this);
+                    stack.Pop().RewriteObject(function);
+                }else{
+                    stack.Pop().RewriteObject(value);
+                }
             }
             public void CALL(int count){
 
@@ -2954,7 +3183,7 @@ namespace Shark{
                 currentRunable.jumpToEnd();
 
                 // 更换当前的被执行单位
-                Console.WriteLine($"---------更换当前的运行时, from {currentRunable.GetHashCode()} to {runableStack[runableStack.Count - 1].GetHashCode()}");
+                // Console.WriteLine($"---------更换当前的运行时, from {currentRunable.GetHashCode()} to {runableStack[runableStack.Count - 1].GetHashCode()}");
                 currentRunable = runableStack.Last();
                 runableStack.Remove(currentRunable);
                 isCallFunctionNow = runableStack.Count != 0;
@@ -2969,7 +3198,7 @@ namespace Shark{
                 currentRunable.jumpToEnd();
 
                 // 更换当前的被执行单位
-                Console.WriteLine("---------更换当前的运行时");
+                // Console.WriteLine("---------更换当前的运行时");
                 currentRunable = runableStack.Last();
                 runableStack.Remove(currentRunable);
                 isCallFunctionNow = runableStack.Count != 0;
@@ -2983,11 +3212,16 @@ namespace Shark{
                     throw new SharkNameError($"name {currentScript.getSymbol(id)} is undefined at line {currentLine.ToString()}");
                 }
             }
+            public void OP_PUSH_THIS(){
+
+                stack.Push(currentRunable.getThis());
+            }
+            public void OP_GET_FIELD(int id){
+
+                SkTable table = (SkTable)stack.Pop();
+                stack.Push(table.GetField(id));
+            }
         }
-
-
-
-
 
         /// <summary>
         /// Shark脚本的模块系统
@@ -3051,6 +3285,7 @@ namespace Shark{
         /// </summary>
         public enum SkObjectType{
 
+            OT_UNDEFINED,
             OT_NULL,
             OT_FUNCTION,
             OT_FUNCTION_CORE,           // 函数核心
@@ -3174,7 +3409,6 @@ namespace Shark{
 
                 if(left.BaseType == right.BaseType){
                     if(left.BaseType == SkObjectType.OT_VALUE){
-                        Console.WriteLine($"opcode test : {((SkValue)left).Eq(((SkValue)right))}");
                         return ((SkValue)left).Eq(((SkValue)right));
                     }else{
                         return left == right ? SkBool.TRUE : SkBool.FALSE;
@@ -3295,7 +3529,7 @@ namespace Shark{
 
             private int id;
             private string symbol;
-            private SkMetaTable header;
+            protected SkTable header;
             private SkObjectType baseType;
 
             public int ID{
@@ -3322,7 +3556,7 @@ namespace Shark{
                 value.inheritFrom(this);
                 header.SetField(value, id);
             }
-            public void bindHeader(SkMetaTable header){
+            public void bindHeader(SkTable header){
                 this.header = header;
             }
             public void inheritFrom(SkObject old){
@@ -3330,6 +3564,14 @@ namespace Shark{
                 id = old.ID;
                 symbol = old.Symbol;
                 bindHeader(old.header);
+            }
+        }
+        public class SkUndefined: SkObject{
+
+            public SkUndefined(int id, string symbol):base(id, symbol, SkObjectType.OT_UNDEFINED){}
+            public override string ToString()
+            {
+                return "undefined";
             }
         }
         public class SkNull: SkObject{
@@ -3387,7 +3629,9 @@ namespace Shark{
 
             private Dictionary<int, SkObject> tempStack;            // 运行时栈区
             private SkTable thisTable;
-            
+            public SkTable ThisTable{
+                get => thisTable;
+            }
 
             public SharkFunctionRuntimeStack(){
 
@@ -3480,7 +3724,9 @@ namespace Shark{
 
             // --- 函数基础信息 ---
             private SharkFunctionCore function;
-            private SharkFunctionRuntimeStack runtimeStack;
+            // private SharkFunctionRuntimeStack runtimeStack;
+            private SkTable thisTable;
+            private Dictionary<int, SkObject> runtimeStack;
             private SharkRunable parent;
             private SharkScript script;
             private int pointer;
@@ -3495,16 +3741,13 @@ namespace Shark{
             public SharkRunable Parent{
                 get => parent;
             }
-
-            public SharkFunctionRuntimeStack RuntimeStack{
-                get => runtimeStack;
-            }
             public SharkFunction(SharkFunctionCore core): base(SkFunctionType.Shark){
 
                 this.function = core;
                 this.script = null;
                 this.parent = null;
-                runtimeStack = new SharkFunctionRuntimeStack();
+                runtimeStack = new Dictionary<int, SkObject>();
+                header = new SkTable();
             }
             public void bindParent(SharkRunable parent){
                 this.parent = parent;
@@ -3521,42 +3764,26 @@ namespace Shark{
                 return script.getSymbol(id);
             }
             public SkObject getVariable(int id){
-                SkObject O = runtimeStack.accessLocalVariable(id);
-                if(O != null)return O;
-                return parent.getVariable(id);
+                if(runtimeStack.ContainsKey(id)){
+                    return runtimeStack[id];
+                }else{
+                    return parent.getVariable(id);
+                }
             }
             /// <summary>
             /// 设置函数当前的变量
             /// </summary>
             public void setVariable(SkObject value, int id){
-                runtimeStack.setVariable(value, id);
+                if(runtimeStack.ContainsKey(id)){
+                    runtimeStack[id] = value;
+                }else{
+                    runtimeStack.Add(id, value);
+                }
             }
             public bool hasParent(){
                 return parent != null;
             }
             public void loadCommands(SharkILStream stream){}
-            public SkObject accessLocalVariable(int id){
-                return runtimeStack.accessLocalVariable(id);
-            }
-
-            // /// <summary>
-            // /// 复制所有的上值到该函数自身的函数栈中
-            // /// </summary>
-            // public void copyUpValues(){
-
-            //     foreach(int varID in upValuelist){
-
-            //     }
-            // }
-            // /// <summary>
-            // /// 查询一个上值, 注意被查询的上值只有当被查询对象不是脚本本身时才有意义
-            // /// 所以当查询到的对象已经是脚本时, 则没有必要再查询
-            // /// </summary>
-            // public void searchUpValue(){
-
-
-            // }
-
             /// <summary>
             /// 执行一个Shark风格的函数
             /// </summary>
@@ -3640,6 +3867,9 @@ namespace Shark{
                 // }
                 // contents.Add(string.Empty);
             }
+            public SkTable getThis(){
+                return header;
+            }
         }
 
         /// <summary>
@@ -3679,7 +3909,10 @@ namespace Shark{
                 if(table.ContainsKey(id)){
                     return table[id];
                 }
-                return SharkCore.NULL;
+                SkObject value = new SkUndefined(id, SharkVM.vm.currentScript.getSymbol(id));
+                value.bindHeader(this);
+                table.Add(id, value);
+                return value;
             }
             public void SetField(SkObject value, int id){
                 if(table.ContainsKey(id)){
