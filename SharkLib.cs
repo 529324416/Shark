@@ -23,6 +23,11 @@ namespace Shark{
             }
         }
 
+        public static class SharkListLib{
+
+            public static SharkVM VM;
+        }
+
         public static class SharkCommonLib{
 
             public static SharkVM VM;
@@ -32,7 +37,7 @@ namespace Shark{
                 List<SkPack> O = new List<SkPack>();
                 O.Add(new SkPack(0, "print", new NativeFunction(Print)));
                 O.Add(new SkPack(1, "get_parent", new NativeFunction(FunctionDebug)));
-                // O.Add(new SkPack(1, "pow", new NativeFunction(Pow)));
+                O.Add(new SkPack(2, "pow", new NativeFunction(Pow)));
                 return O;
             }
 
