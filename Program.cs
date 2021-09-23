@@ -24,8 +24,14 @@ namespace Shark
             SharkVM vm = new SharkVM();
             SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.js"));
             SkParser parser = new SkParser();
-            parser.loadLexerSouce(lexer);                               // 初始化语法解析器
-            parser.parseScript();                                       // 语法解析
+
+            try{
+                parser.loadLexerSouce(lexer);                               // 初始化语法解析器
+                parser.parseScript();                                       // 语法解析
+            }catch(SharkSyntaxError e){
+                Console.WriteLine(e.Message);
+            }
+
 
 
             SharkScript script = parser.generateScript(false);          // 生成脚本

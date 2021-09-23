@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using Shark;
 using Shark.SharkCore;
 using Shark.SharkVirtualMachine;
+using System.Threading;
 
 
 namespace Shark{
@@ -36,8 +37,15 @@ namespace Shark{
 
                 List<SkPack> O = new List<SkPack>();
                 O.Add(new SkPack(0, "print", new NativeFunction(Print)));
-                O.Add(new SkPack(1, "get_parent", new NativeFunction(FunctionDebug)));
-                O.Add(new SkPack(2, "pow", new NativeFunction(Pow)));
+                O.Add(new SkPack(1, "sleep", new NativeFunction(__sleep)));
+                O.Add(new SkPack(2, "dice", new NativeFunction(__dice)));
+                O.Add(new SkPack(3, "randint", new NativeFunction(__random_int)));
+                O.Add(new SkPack(4, "random", new NativeFunction(__random)));
+                O.Add(new SkPack(5, "__hashcode", new NativeFunction(__hashcode)));
+                // O.Add(new SkPack(7, "sleep", new NativeFunction(__sleep)));
+                // O.Add(new SkPack(8, "dice", new NativeFunction(__dice)));
+                // O.Add(new SkPack(9, "randint", new NativeFunction(__random_int)));
+
                 return O;
             }
 
@@ -74,6 +82,35 @@ namespace Shark{
                     Console.WriteLine("不支持调试的对象");
                 }
                 return SkNull.NULL;
+            }
+            public static SkObject __hashcode(SkTuple args){
+
+                Console.WriteLine(args.__index(0).GetHashCode());
+                return SkNull.NULL;
+            }
+            public static SkObject __random(SkTuple args){
+
+                Random a = new Random();
+                return new SkFloat((float)a.NextDouble());
+            }
+            public static SkObject __random_int(SkTuple args){
+
+                Random a = new Random();
+                SkValue left = (SkValue)args.__index(0);
+                SkValue right = (SkValue)args.__index(1);
+                return new SkInt(a.Next(left.getInt(), right.getInt()));
+            }
+            public static SkObject __sleep(SkTuple args){
+
+                float time = ((SkValue)args.__index(0)).getFloat() * 1000;
+                Thread.Sleep((int)time);
+                return SkNull.NULL;
+            }
+            public static SkObject __dice(SkTuple args){
+
+                Random a = new Random();
+                SkValue value = (SkValue)args.__index(0);
+                return new SkBool(a.NextDouble() < value.getFloat());
             }
         }
     }
