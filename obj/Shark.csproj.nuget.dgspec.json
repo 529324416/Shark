@@ -13,8 +13,12 @@
         "packagesPath": "C:\\Users\\MECHREVO\\.nuget\\packages\\",
         "outputPath": "C:\\Users\\MECHREVO\\Desktop\\Shark\\obj\\",
         "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "D:\\Code\\VisualStudioShard\\NuGetPackages"
+        ],
         "configFilePaths": [
           "C:\\Users\\MECHREVO\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [

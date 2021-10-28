@@ -20,8 +20,9 @@ namespace Shark
     {
         static void Main(string[] args)
         {
-            // 执行中间代码
+            Stopwatch start = new Stopwatch();
             SharkVM vm = new SharkVM();
+
             SkLexer lexer = new SkLexer(SharkUtils.ReadFile("./test.js"));
             SkParser parser = new SkParser();
 
@@ -32,8 +33,7 @@ namespace Shark
                 Console.WriteLine(e.Message);
             }
 
-
-
+            
             SharkScript script = parser.generateScript(false);          // 生成脚本
             vm.LoadScript(script);
             script.DEBUG_MODEL = false;
@@ -44,32 +44,15 @@ namespace Shark
         
 
             Console.WriteLine("--- 执行结果 ---");
+            start.Start();
             try{
                 script.runScript();
             }catch(SharkError e){
                 Console.WriteLine(e.Message);
                 Console.ForegroundColor = ConsoleColor.Green;
             }
-
-            // vm.currentRunable.showCodes();
-
-
-            // Console.WriteLine(script.getVariable("_"));
-            // vm.RunScript(script);
-
-            // Console.WriteLine(script.getVariable("x"));
-            // Console.WriteLine(vm.stack.Pop());
-            // 执行中间代码结束
-
-
-            // 其他测试
-            // SkTable a = new SkTable();
-            // a.Setter(new SkInt(), "b");
-            // SkObject b = a.Getter("b");
-            // ((SkInt)b).data = 11;
-
-            // Console.WriteLine(((SkInt)a.Getter("b")).data);
-            // 其他测试结束
+            start.Stop();
+            Console.WriteLine(((double)start.ElapsedMilliseconds)/1000.0);
 
         }
         static void TEST_Lexer(string filepath){

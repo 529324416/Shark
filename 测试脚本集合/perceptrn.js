@@ -1,3 +1,5 @@
+/* Shark脚本案例：感知机算法 */
+
 function dot(l, r){
     s = 0
     for(i = 0; i < 2; i += 1){

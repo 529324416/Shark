@@ -41,11 +41,6 @@ namespace Shark{
                 O.Add(new SkPack(2, "dice", new NativeFunction(__dice)));
                 O.Add(new SkPack(3, "randint", new NativeFunction(__random_int)));
                 O.Add(new SkPack(4, "random", new NativeFunction(__random)));
-                O.Add(new SkPack(5, "__hashcode", new NativeFunction(__hashcode)));
-                // O.Add(new SkPack(7, "sleep", new NativeFunction(__sleep)));
-                // O.Add(new SkPack(8, "dice", new NativeFunction(__dice)));
-                // O.Add(new SkPack(9, "randint", new NativeFunction(__random_int)));
-
                 return O;
             }
 

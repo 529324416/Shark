@@ -9,11 +9,13 @@ using System.Runtime.InteropServices;
 using Shark.SharkVirtualMachine;
 using Shark.SharkLexer;
 using Shark.SharkCore;
+using Shark.SharkParser;
 using Shark.SharkLib;
 
 namespace Shark{
 
     public enum SharkErrorType{
+        // TODO 完善中...
 
         // 语法异常
         SYNTAX_EXPECT_RIGHT_PAREN,                  // ) 缺失
@@ -1970,7 +1972,6 @@ namespace Shark{
                     throw new SharkSyntaxError($"incompleted statement at line {currentLine.ToString()}");
                 }
             }
-            
             public void nextStatementThisHandle(){
                 emitter.pushThis(currentLine);
                 if(matchToken(SkTokenType.TOKEN_DOT)){
@@ -1981,7 +1982,6 @@ namespace Shark{
                     }
                 }
             }
-
             /// <summary>
             /// 将所有的参数压入栈区
             /// </summary>
@@ -2193,6 +2193,10 @@ namespace Shark{
                 throw new SharkSyntaxError($"for condition should end with \")\" at line {currentLine.ToString()}");
             }
 
+            public void nextForEx(){
+
+
+            }
             /// <summary>
             /// 解析一个完整的普通函数定义，普通函数的定义必须有一个函数名，
             /// 如果没有函数名则认为是语法错误 
@@ -2370,6 +2374,7 @@ namespace Shark{
             // 型号1, NO_PARAM
             OP_PUSH_FALSE,         // 向堆栈中压入一个FALSE             
             OP_PUSH_TRUE,          // 向堆栈中压入一个TRUE
+            OP_PUSH_THIS,          /* 向堆栈中压入当前函数的this表 */
 
             OP_A_ADD_INDEX,
             OP_A_SUB_INDEX,
@@ -2377,17 +2382,6 @@ namespace Shark{
             OP_A_DIV_INDEX,
             OP_A_MOD_INDEX,
 
-            OP_A_ADD_FIELD,
-            OP_A_SUB_FIELD,
-            OP_A_MUL_FIELD,
-            OP_A_DIV_FIELD,
-            OP_A_MOD_FIELD,
-
-            OP_A_ADD_LOCAL,
-            OP_A_SUB_LOCAL,
-            OP_A_MUL_LOCAL,
-            OP_A_DIV_LOCAL,
-            OP_A_MOD_LOCAL,
             OP_ADD,                
             OP_SUB,
             OP_MUL,
@@ -2395,6 +2389,7 @@ namespace Shark{
             OP_MOD,
             OP_BIT_AND,
             OP_BIT_OR,
+            OP_BIT_NOT,
             OP_BIT_LSHIFT,
             OP_BIT_RSHIFT,
             OP_GT,
@@ -2408,7 +2403,6 @@ namespace Shark{
 
             OP_NOT,
             OP_NEG,
-            OP_BIT_NOT,
 
             OP_END,
             OP_INDEX,                   /* 从堆栈中取出两个值, 从后者中索引前者, 后者必须是一个列表，前者必须是一个数学表达式 */
@@ -2421,31 +2415,32 @@ namespace Shark{
 
             // 型号2, PARAM_32BIT
             
-            OP_PUSH_CONST,         // 向堆栈中压入一个常量
-            OP_PUSH_INT,           // 向堆栈中压入一个整型值
-            OP_PUSH_FLOAT,         // 向堆栈中压入一个单精度值
+            OP_A_ADD_FIELD,
+            OP_A_SUB_FIELD,
+            OP_A_MUL_FIELD,
+            OP_A_DIV_FIELD,
+            OP_A_MOD_FIELD,
 
-            OP_GET_LOCAL,           // 向堆栈中压入一个变量
+            OP_A_ADD_LOCAL,
+            OP_A_SUB_LOCAL,
+            OP_A_MUL_LOCAL,
+            OP_A_DIV_LOCAL,
+            OP_A_MOD_LOCAL,
+            OP_PUSH_CONST,         // 向堆栈中压入一个常量
+
+            OP_GET_LOCAL,          // 向堆栈中压入一个变量
             OP_SET_LOCAL,          /* 从堆栈中取出一个值，然后将其赋值给全局表中指定的对象 */
             OP_GET_FIELD,          /* 从堆栈中取出一个对象，并从中访问一个指定的字段，再次压入堆栈中 */
             OP_SET_FIELD,
 
             OP_PUSH_FUNC,          /* 从函数表中取出一个函数核心, 然后创建一个函数并压入堆栈中*/
-            OP_PUSH_THIS,          /* 向堆栈中压入当前函数的this表 */
-            OP_PUSH_GLOBAL,         /* 向堆栈中压入当前的全局表 */
             CALL,
             JCALL,                 // 调用的函数结果并不会压住堆栈中
             
 
             JMP_FALSE,           // 从栈区中取出一个单位，如果检查为false，则跳过指定数量的操作码
             JMP_TO,              // 无条件直接跳转到指定的位置
-            JMP,                 // 无条件直接跳过指定数量的操作码
             DEF_LIST,
-
-
-            // 型号3, PARAM_64BIT
-            OP_PUSH_LONG,          // 向堆栈中压入一个长整型值
-            OP_PUSH_DOUBLE,        // 向堆栈中压入一个双精度值
 
         }
 
@@ -2504,7 +2499,8 @@ namespace Shark{
             }
         }
         public class SharkInternalCodeNoParam: SharkInternalCodeBase{
-            public SharkInternalCodeNoParam(SharkOpcodeType type, int line, int codeNumber):base(type, SharkOpcodeModel.MODEL_NO_PARAM, line, codeNumber){}
+            public SharkInternalCodeNoParam(SharkOpcodeType type, int line, int codeNumber):
+            base(type, SharkOpcodeModel.MODEL_NO_PARAM, line, codeNumber){}
             public override string ToString()
             {
                 return base.ToString();
@@ -2932,26 +2928,13 @@ namespace Shark{
 
             public void runScript(){
 
-                int count = 0;
+                pointer = 0;
                 while(pointer < codes.Size){
                     SharkInternalCodeBase code = codes.getOpcode(pointer);
                     line = code.line;
                     if(DEBUG_MODEL)Console.WriteLine(code);
-                    switch(code.opModel){
-
-                        case SharkOpcodeModel.MODEL_NO_PARAM:
-                        interpreter.op_search_table_no_param[code.opType]();
-                        break;
-
-                        case SharkOpcodeModel.MODEL_PARAM_1_32BIT:
-                        interpreter.op_search_table_1_32bit[code.opType](((SharkInternalCode_1_32BIT)code).IntValue);
-                        break;
-                    }
+                    interpreter.executeArray(code);
                     pointer ++;
-                    count ++;
-                    if(max > 0 && count >= max){
-                        break;
-                    }
                 }
             }
             public void jumpTo(int position){
@@ -3027,9 +3010,11 @@ namespace Shark{
 
             private bool isCallFunctionNow;
 
-            public Dictionary<SharkOpcodeType, opfunc_no_param> op_search_table_no_param;
-            public Dictionary<SharkOpcodeType, opfunc_1_32bit> op_search_table_1_32bit;
-            public Dictionary<SharkOpcodeType, opfunc_1_64bit> op_search_table_1_64bit;
+            // public Dictionary<SharkOpcodeType, opfunc_no_param> op_search_table_no_param;
+            // public Dictionary<SharkOpcodeType, opfunc_1_32bit> op_search_table_1_32bit;
+            // public Dictionary<SharkOpcodeType, opfunc_1_64bit> op_search_table_1_64bit;
+
+            public opfunc_1_32bit[] opcodes;
 
             public int currentLine{
                 get => currentRunable.getCurrentLine();
@@ -3040,66 +3025,339 @@ namespace Shark{
                 vm = this;
                 runableStack = new List<SharkRunable>();
                 stack = new Stack<SkObject>();
-                op_search_table_no_param = new Dictionary<SharkOpcodeType, opfunc_no_param>();
-                op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_FALSE, OP_PUSH_FALSE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_TRUE, OP_PUSH_TRUE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_A_ADD_INDEX, OP_A_ADD_INDEX);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_A_SUB_INDEX, OP_A_SUB_INDEX);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_A_MUL_INDEX, OP_A_MUL_INDEX);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_A_DIV_INDEX, OP_A_DIV_INDEX);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_A_MOD_INDEX, OP_A_MOD_INDEX);
 
-                op_search_table_no_param.Add(SharkOpcodeType.OP_ADD, OP_ADD);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_SUB, OP_SUB);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_NEG, OP_NEG);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_MUL, OP_MUL);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_DIV, OP_DIV);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_MOD, OP_MOD);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_GT, OP_GT);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_GE, OP_GE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_LE, OP_LE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_LT, OP_LT);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_EQ, OP_EQ);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_NE, OP_NE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_NOT, OP_NOT);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_AND, OP_AND);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_OR, OP_OR);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_END, OP_END);
-                op_search_table_no_param.Add(SharkOpcodeType.RET, RET);
-                op_search_table_no_param.Add(SharkOpcodeType.RET_NONE, RET_NONE);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_THIS, OP_PUSH_THIS);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_INDEX, INDEX);
-                op_search_table_no_param.Add(SharkOpcodeType.OP_SET_INDEX, OP_SET_INDEX);
-                
-                op_search_table_1_32bit = new Dictionary<SharkOpcodeType, opfunc_1_32bit>();
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_ADD_LOCAL, OP_A_ADD_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_SUB_LOCAL, OP_A_SUB_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MUL_LOCAL, OP_A_MUL_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_DIV_LOCAL, OP_A_DIV_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MOD_LOCAL, OP_A_MOD_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_ADD_FIELD, OP_A_ADD_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_SUB_FIELD, OP_A_SUB_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MUL_FIELD, OP_A_MUL_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_DIV_FIELD, OP_A_DIV_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MOD_FIELD, OP_A_MOD_FIELD);
-
-                
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_CONST, OP_PUSH_CONST);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_GET_LOCAL, OP_GET_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_SET_LOCAL, OP_SET_LOCAL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_SET_FIELD, OP_SET_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.CALL, CALL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.JCALL, JCALL);
-                op_search_table_1_32bit.Add(SharkOpcodeType.JMP_FALSE, JUMP_FALSE);
-                op_search_table_1_32bit.Add(SharkOpcodeType.JMP_TO, JUMP_TO);
-                op_search_table_1_32bit.Add(SharkOpcodeType.JMP, JUMP);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_FUNC, OP_PUSH_FUNC);
-                op_search_table_1_32bit.Add(SharkOpcodeType.OP_GET_FIELD, OP_GET_FIELD);
-                op_search_table_1_32bit.Add(SharkOpcodeType.DEF_LIST, DEFINE_LIST);
-
+                initializeArray();
+                initializeDictionary();
                 isCallFunctionNow = false;
             }
+            public void initializeArray(){
 
+                opcodes = new opfunc_1_32bit[]{
+                    OP_PUSH_FALSE,         // 向堆栈中压入一个FALSE             
+                    OP_PUSH_TRUE,          // 向堆栈中压入一个TRUE
+                    OP_PUSH_THIS,          /* 向堆栈中压入当前函数的this表 */
+
+                    OP_A_ADD_INDEX,
+                    OP_A_SUB_INDEX,
+                    OP_A_MUL_INDEX,
+                    OP_A_DIV_INDEX,
+                    OP_A_MOD_INDEX,
+
+                    OP_ADD,                
+                    OP_SUB,
+                    OP_MUL,
+                    OP_DIV,
+                    OP_MOD,
+                    OP_BIT_AND,
+                    OP_BIT_OR,
+                    OP_BIT_NOT,
+                    OP_BIT_LSHIFT,
+                    OP_BIT_RSHIFT,
+                    OP_GT,
+                    OP_GE,
+                    OP_LT,
+                    OP_LE,
+                    OP_EQ,
+                    OP_NE,
+                    OP_AND,
+                    OP_OR,
+
+                    OP_NOT,
+                    OP_NEG,
+                    
+                    OP_END,
+                    INDEX,                   
+                    OP_SET_INDEX,
+                    
+                    RET_NONE,
+                    RET,
+                    OP_A_ADD_FIELD,
+                    OP_A_SUB_FIELD,
+                    OP_A_MUL_FIELD,
+                    OP_A_DIV_FIELD,
+                    OP_A_MOD_FIELD,
+
+                    OP_A_ADD_LOCAL,
+                    OP_A_SUB_LOCAL,
+                    OP_A_MUL_LOCAL,
+                    OP_A_DIV_LOCAL,
+                    OP_A_MOD_LOCAL,
+                    OP_PUSH_CONST,         // 向堆栈中压入一个常量
+
+                    OP_GET_LOCAL,          // 向堆栈中压入一个变量
+                    OP_SET_LOCAL,          /* 从堆栈中取出一个值，然后将其赋值给全局表中指定的对象 */
+                    OP_GET_FIELD,          /* 从堆栈中取出一个对象，并从中访问一个指定的字段，再次压入堆栈中 */
+                    OP_SET_FIELD,
+
+                    OP_PUSH_FUNC,          /* 从函数表中取出一个函数核心, 然后创建一个函数并压入堆栈中*/
+                    
+                    CALL,
+                    JCALL,                 // 调用的函数结果并不会压住堆栈中
+                    
+
+                    JMP_FALSE,           // 从栈区中取出一个单位，如果检查为false，则跳过指定数量的操作码
+                    JMP_TO,              // 无条件直接跳转到指定的位置
+                    DEF_LIST,
+                };
+            }
+            public void initializeDictionary(){
+                // op_search_table_no_param = new Dictionary<SharkOpcodeType, opfunc_no_param>();
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_FALSE, OP_PUSH_FALSE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_TRUE, OP_PUSH_TRUE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_A_ADD_INDEX, OP_A_ADD_INDEX);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_A_SUB_INDEX, OP_A_SUB_INDEX);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_A_MUL_INDEX, OP_A_MUL_INDEX);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_A_DIV_INDEX, OP_A_DIV_INDEX);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_A_MOD_INDEX, OP_A_MOD_INDEX);
+
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_ADD, OP_ADD);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_SUB, OP_SUB);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_NEG, OP_NEG);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_MUL, OP_MUL);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_DIV, OP_DIV);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_MOD, OP_MOD);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_GT, OP_GT);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_GE, OP_GE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_LE, OP_LE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_LT, OP_LT);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_EQ, OP_EQ);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_NE, OP_NE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_NOT, OP_NOT);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_AND, OP_AND);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_OR, OP_OR);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_END, OP_END);
+                // op_search_table_no_param.Add(SharkOpcodeType.RET, RET);
+                // op_search_table_no_param.Add(SharkOpcodeType.RET_NONE, RET_NONE);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_PUSH_THIS, OP_PUSH_THIS);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_INDEX, INDEX);
+                // op_search_table_no_param.Add(SharkOpcodeType.OP_SET_INDEX, OP_SET_INDEX);
+                
+                // op_search_table_1_32bit = new Dictionary<SharkOpcodeType, opfunc_1_32bit>();
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_ADD_LOCAL, OP_A_ADD_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_SUB_LOCAL, OP_A_SUB_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MUL_LOCAL, OP_A_MUL_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_DIV_LOCAL, OP_A_DIV_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MOD_LOCAL, OP_A_MOD_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_ADD_FIELD, OP_A_ADD_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_SUB_FIELD, OP_A_SUB_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MUL_FIELD, OP_A_MUL_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_DIV_FIELD, OP_A_DIV_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_A_MOD_FIELD, OP_A_MOD_FIELD);
+
+                
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_CONST, OP_PUSH_CONST);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_PUSH_FUNC, OP_PUSH_FUNC);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_GET_LOCAL, OP_GET_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_SET_LOCAL, OP_SET_LOCAL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_SET_FIELD, OP_SET_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.OP_GET_FIELD, OP_GET_FIELD);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.CALL, CALL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.JCALL, JCALL);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.JMP_FALSE, JMP_FALSE);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.JMP_TO, JMP_TO);
+                // op_search_table_1_32bit.Add(SharkOpcodeType.DEF_LIST, DEF_LIST);
+            }
+            public void executeArray(SharkInternalCodeBase code){
+
+                int value = 0;
+                if(code.opModel == SharkOpcodeModel.MODEL_PARAM_1_32BIT){
+                    value = ((SharkInternalCode_1_32BIT)code).IntValue;
+                }
+                opcodes[(byte)code.opType](value);
+            }
+            public void execute(SharkInternalCodeBase code){
+
+                // switch(code.opType){
+
+                //     case SharkOpcodeType.OP_PUSH_FALSE:
+                //     OP_PUSH_FALSE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_PUSH_TRUE:
+                //     OP_PUSH_TRUE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_PUSH_THIS:
+                //     OP_PUSH_THIS();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_ADD_LOCAL:
+                //     OP_A_ADD_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_SUB_LOCAL:
+                //     OP_A_SUB_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+                    
+                //     case SharkOpcodeType.OP_A_MUL_LOCAL:
+                //     OP_A_MUL_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_DIV_LOCAL:
+                //     OP_A_DIV_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_MOD_LOCAL:
+                //     OP_A_MOD_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_ADD:
+                //     OP_ADD();
+                //     break;
+
+                //     case SharkOpcodeType.OP_SUB:
+                //     OP_SUB();
+                //     break;
+
+                //     case SharkOpcodeType.OP_MUL:
+                //     OP_MUL();
+                //     break;
+
+                //     case SharkOpcodeType.OP_DIV:
+                //     OP_DIV();
+                //     break;
+
+                //     case SharkOpcodeType.OP_MOD:
+                //     OP_MOD();
+                //     break;
+
+                //     case SharkOpcodeType.OP_LT:
+                //     OP_LT();
+                //     break;
+
+                //     case SharkOpcodeType.OP_LE:
+                //     OP_LE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_EQ:
+                //     OP_EQ();
+                //     break;
+
+                //     case SharkOpcodeType.OP_NE:
+                //     OP_NE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_GT:
+                //     OP_GT();
+                //     break;
+
+                //     case SharkOpcodeType.OP_GE:
+                //     OP_GE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_NOT:
+                //     OP_NOT();
+                //     break;
+
+                //     case SharkOpcodeType.OP_AND:
+                //     OP_AND();
+                //     break;
+
+                //     case SharkOpcodeType.OP_OR:
+                //     OP_OR();
+                //     break;
+
+                //     case SharkOpcodeType.RET:
+                //     RET();
+                //     break;
+
+                //     case SharkOpcodeType.RET_NONE:
+                //     RET_NONE();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_ADD_INDEX:
+                //     OP_A_ADD_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_SUB_INDEX:
+                //     OP_A_SUB_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_MUL_INDEX:
+                //     OP_A_MUL_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_DIV_INDEX:
+                //     OP_A_DIV_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_MOD_INDEX:
+                //     OP_A_MOD_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_INDEX:
+                //     INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_SET_INDEX:
+                //     OP_SET_INDEX();
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_ADD_FIELD:
+                //     OP_A_ADD_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_SUB_FIELD:
+                //     OP_A_SUB_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+                    
+                //     case SharkOpcodeType.OP_A_MUL_FIELD:
+                //     OP_A_MUL_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_DIV_FIELD:
+                //     OP_A_DIV_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_A_MOD_FIELD:
+                //     OP_A_MOD_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_PUSH_CONST:
+                //     OP_PUSH_CONST(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_GET_LOCAL:
+                //     OP_GET_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_SET_LOCAL:
+                //     OP_SET_LOCAL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_SET_FIELD:
+                //     OP_SET_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_GET_FIELD:
+                //     OP_GET_FIELD(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.CALL:
+                //     CALL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.JCALL:
+                //     JCALL(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.JMP_FALSE:
+                //     JMP_FALSE(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.JMP_TO:
+                //     JMP_TO(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.OP_PUSH_FUNC:
+                //     OP_PUSH_FUNC(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+
+                //     case SharkOpcodeType.DEF_LIST:
+                //     DEF_LIST(((SharkInternalCode_1_32BIT)code).IntValue);
+                //     break;
+                // }
+            }
             public void RunScript(SharkScript script){
 
                 LoadScript(script);
@@ -3133,11 +3391,16 @@ namespace Shark{
                 }
                 return source;
             }
-            public void OP_PUSH_TRUE(){
+            public void OP_BIT_AND(int _){}
+            public void OP_BIT_OR(int _){}
+            public void OP_BIT_NOT(int _){}
+            public void OP_BIT_LSHIFT(int _){}
+            public void OP_BIT_RSHIFT(int _){}
+            public void OP_PUSH_TRUE(int _){
 
                 stack.Push(SkBool.TRUE);
             }
-            public void OP_PUSH_FALSE(){
+            public void OP_PUSH_FALSE(int _){
 
                 stack.Push(SkBool.FALSE);
             }
@@ -3145,7 +3408,6 @@ namespace Shark{
 
                 stack.Push(currentScript.__get_const(id).Clone());
             }
-
             public void OP_A_ADD_LOCAL(int id){
 
                 SharkLabel label = currentRunable.getLocalLabel(id, currentScript.getSymbol(id));
@@ -3194,7 +3456,7 @@ namespace Shark{
                 SharkLabel label = currentRunable.getObjectLabel(id, currentScript.getSymbol(id));
                 SharkAPI.LocalMod(label, stack.Pop());
             }
-            public void OP_A_ADD_INDEX(){
+            public void OP_A_ADD_INDEX(int _){
 
                 SkObject value = stack.Pop();
                 SkObject index = stack.Pop();
@@ -3212,11 +3474,11 @@ namespace Shark{
                     throw new SharkSyntaxError($"cannot set value of type {holder.BaseType.ToString()} at line {currentLine.ToString()}");
                 }
             }
-            public void OP_A_SUB_INDEX(){}
-            public void OP_A_MUL_INDEX(){}
-            public void OP_A_DIV_INDEX(){}
-            public void OP_A_MOD_INDEX(){}
-            public void OP_SET_INDEX(){
+            public void OP_A_SUB_INDEX(int _){}
+            public void OP_A_MUL_INDEX(int _){}
+            public void OP_A_DIV_INDEX(int _){}
+            public void OP_A_MOD_INDEX(int _){}
+            public void OP_SET_INDEX(int _){
                 
                 SkObject value = stack.Pop();
                 SkObject index = stack.Pop();
@@ -3233,66 +3495,65 @@ namespace Shark{
                     throw new SharkSyntaxError($"cannot set value of type {holder.BaseType.ToString()} at line {currentLine.ToString()}");
                 }
             }
-
-            public void OP_ADD(){
+            public void OP_ADD(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Add(stack.Pop(), tmp));
             }
-            public void OP_SUB(){
+            public void OP_SUB(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Sub(stack.Pop(), tmp));
             }
-            public void OP_NEG(){
+            public void OP_NEG(int _){
                 stack.Push(SharkAPI.Neg(stack.Pop()));
             }
-            public void OP_MUL(){
+            public void OP_MUL(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Mul(stack.Pop(), tmp));
             }
-            public void OP_DIV(){
+            public void OP_DIV(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Div(stack.Pop(), tmp));
             }
-            public void OP_MOD(){
+            public void OP_MOD(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Mod(stack.Pop(), tmp));
             }
-            public void OP_GT(){
+            public void OP_GT(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Gt(stack.Pop(), tmp));
             }
-            public void OP_GE(){
+            public void OP_GE(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Ge(stack.Pop(), tmp));
             }
-            public void OP_LE(){
+            public void OP_LE(int _){
 
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Le(stack.Pop(), tmp));
             }
-            public void OP_LT(){
+            public void OP_LT(int _){
                 
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Lt(stack.Pop(), tmp));
             }
-            public void OP_NE(){
+            public void OP_NE(int _){
 
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Ne(stack.Pop(), tmp));
             }
-            public void OP_EQ(){
+            public void OP_EQ(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Eq(stack.Pop(), tmp));
             }
-            public void OP_AND(){
+            public void OP_AND(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.And(stack.Pop(), tmp));
             }
-            public void OP_OR(){
+            public void OP_OR(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Or(stack.Pop(), tmp));
             }
-            public void OP_NOT(){
+            public void OP_NOT(int _){
                 SkObject tmp = stack.Pop();
                 stack.Push(SharkAPI.Not(stack.Pop()));
             }
@@ -3378,7 +3639,6 @@ namespace Shark{
 
                     
                     SkCallable skCallable = (SkCallable)_obj;
-                    // Console.WriteLine($"正在调用函数：{skCallable}");
                     skCallable.setFunctionFlag(FUNCTION_CALL_FLAG.JCALL);
                     skCallable.call(paramlist);
                     
@@ -3386,7 +3646,6 @@ namespace Shark{
 
                     isCallFunctionNow = true;
                     SharkFunction function = new SharkFunction((SharkFunctionCore)_obj);
-                    // Console.WriteLine($"正在调用函数原型：{function.Symbol}");
                     function.setFunctionFlag(FUNCTION_CALL_FLAG.JCALL);
                     function.bindVM(this);
                     function.bindParent(currentRunable, currentScript);
@@ -3398,7 +3657,6 @@ namespace Shark{
 
                     isCallFunctionNow = true;
                     SharkFunction function = (SharkFunction)_obj;
-                    // Console.WriteLine($"正在调用实体函数：{function.Symbol}");
                     function.setFunctionFlag(FUNCTION_CALL_FLAG.JCALL);
                     runableStack.Add(currentRunable);
                     currentRunable = function;
@@ -3407,28 +3665,25 @@ namespace Shark{
                     throw new SharkTypeError($"type \"{_obj.BaseType.ToString()}\" is not callable at line {currentLine.ToString()}");
                 }
             }
-            public void INDEX(){
+            public void INDEX(int  _){
 
                 SkObject index = stack.Pop();
                 stack.Push(SharkAPI.Index(stack.Pop(), index));
             }
-            public void JUMP_FALSE(int length){
+            public void JMP_FALSE(int length){
 
                 SkBool value = (SkBool)stack.Pop();
                 if(value == SkBool.FALSE){
                     currentRunable.jumpOffset(length);
                 }
             }
-            public void JUMP_TO(int pos){
+            public void JMP_TO(int pos){
                 currentRunable.jumpTo(pos);
             }
-            public void JUMP(int length){
-                currentRunable.jumpOffset(length);
-            }
-            public void OP_END(){
+            public void OP_END(int _){
                 currentRunable.jumpTo(currentRunable.getEndPosition());
             }
-            public void RET(){
+            public void RET(int _){
 
                 // 如果该值不被需要的话, 会直接在RET时取出
                 if(((SkCallable)currentRunable).getFunctionFlag() == 
@@ -3438,12 +3693,11 @@ namespace Shark{
                 currentRunable.jumpToEnd();
 
                 // 更换当前的被执行单位
-                // Console.WriteLine($"---------更换当前的运行时, from {currentRunable.GetHashCode()} to {runableStack[runableStack.Count - 1].GetHashCode()}");
                 currentRunable = runableStack.Last();
                 runableStack.Remove(currentRunable);
                 isCallFunctionNow = runableStack.Count != 0;
             }
-            public void RET_NONE(){
+            public void RET_NONE(int _){
 
                 // RET_NONE, 当该值是被其他单位访问时, 会向其中插入一个NONE
                 if(((SkCallable)currentRunable).getFunctionFlag() != 
@@ -3453,7 +3707,6 @@ namespace Shark{
                 currentRunable.jumpToEnd();
 
                 // 更换当前的被执行单位
-                // Console.WriteLine("---------更换当前的运行时");
                 currentRunable = runableStack.Last();
                 runableStack.Remove(currentRunable);
                 isCallFunctionNow = runableStack.Count != 0;
@@ -3461,10 +3714,10 @@ namespace Shark{
             public void OP_PUSH_FUNC(int id){
                 stack.Push(currentScript.getFunctionCore(id));
             }
-            public void OP_PUSH_THIS(){
+            public void OP_PUSH_THIS(int _){
                 stack.Push(currentRunable.getThis());
             }
-            public void DEFINE_LIST(int count){
+            public void DEF_LIST(int count){
 
                 SkList list = new SkList();
                 for(int i = 0; i < count; i ++){
@@ -4153,21 +4406,13 @@ namespace Shark{
                 }
                 for(int i = 0; i < function.paramCount; i ++){
                     int id = function.getParam(i);
-                    getLocalLabel(id, SharkVM.getSymbol(id)).rewrite(args.__index(i));
+                    setLocalLabel(id, SharkVM.getSymbol(id), args.__index(i));
                 }
                 while(ShouldContinue){
                     SharkInternalCodeBase code = function.getOpcode(pointer);
                     line = code.line;
                     if(script.DEBUG_MODEL)Console.WriteLine(code);
-                    switch(code.opModel){
-                        case SharkOpcodeModel.MODEL_NO_PARAM:
-                        interpreter.op_search_table_no_param[code.opType]();
-                        break;
-
-                        case SharkOpcodeModel.MODEL_PARAM_1_32BIT:
-                        interpreter.op_search_table_1_32bit[code.opType](((SharkInternalCode_1_32BIT)code).IntValue);
-                        break;
-                    }
+                    interpreter.executeArray(code);
                     pointer ++;
                 }
                 return null;
@@ -4317,11 +4562,6 @@ namespace Shark{
             public abstract SkValue Mul(SkValue other);
             public abstract SkValue Div(SkValue other);
             public abstract SkValue Mod(SkValue other);
-            // public abstract void _Add(SkValue other);
-            // public abstract void _Sub(SkValue other);
-            // public abstract void _Mul(SkValue other);
-            // public abstract void _Div(SkValue other);
-            // public abstract void _Mod(SkValue other);
             public abstract SkValue Neg();
             public abstract SkValue Ge(SkValue other);
             public abstract SkValue Gt(SkValue other);
@@ -4360,20 +4600,12 @@ namespace Shark{
             }
             public override SkValue Add(SkValue other){
 
-                switch(other.ValueType){
-                    case SkValueType.VT_INT:
-                    return new SkInt(data + other.GetInstance<SkInt>().data);
-
-                    case SkValueType.VT_FLOAT:
-                    return new SkFloat(data + other.GetInstance<SkFloat>().data);
-
-                    case SkValueType.VT_BOOLEAN:
-                    return new SkInt(data + other.GetInstance<SkBool>().data);
-
-                    default:
-                    // this code would never be run
-                    return null;
+                if(other is SkInt){
+                    return new SkInt(data + other.getInt());
+                }else if(other is SkFloat){
+                    return new SkFloat(data + other.getFloat());
                 }
+                return null;
             }
             public override SkValue Sub(SkValue other){
 
@@ -4413,13 +4645,13 @@ namespace Shark{
 
                 switch(other.ValueType){
                     case SkValueType.VT_INT:
-                    return new SkInt(data / other.GetInstance<SkInt>().data);
+                    return new SkInt(data / other.getInt());
 
                     case SkValueType.VT_FLOAT:
-                    return new SkFloat(data / other.GetInstance<SkFloat>().data);
+                    return new SkFloat(data / other.getFloat());
 
                     case SkValueType.VT_BOOLEAN:
-                    return new SkInt(data / other.GetInstance<SkBool>().data);
+                    return new SkInt(data / other.getInt());
 
                     default:
                     // this code would never be run
